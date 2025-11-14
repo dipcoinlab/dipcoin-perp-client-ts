@@ -7,8 +7,8 @@ import { DipCoinPerpSDKOptions } from "../types";
  * Default API base URLs
  */
 export const DEFAULT_API_URLS = {
-  mainnet: "https://api.dipcoin.io",
-  testnet: "https://testnet-api.dipcoin.io",
+  mainnet: "https://gray-api.dipcoin.io",
+  testnet: "https://demoapi.dipcoin.io/exchange",
 };
 
 /**
@@ -23,4 +23,5 @@ export function initSDKOptions(
     customRpc: options.customRpc,
   };
 }
+
 

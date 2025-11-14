@@ -1,17 +1,17 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
-export * from "./sdk";
-export * from "./types";
 export * from "./config";
-export * from "./utils";
+export * from "./sdk";
 export { HttpClient } from "./services/httpClient";
+export * from "./types";
+export * from "./utils";
 
 // Main SDK initialization function
-import { DipCoinPerpSDK } from "./sdk";
-import { DipCoinPerpSDKOptions } from "./types";
 import { Keypair } from "@mysten/sui/cryptography";
 import { initSDKOptions } from "./config";
+import { DipCoinPerpSDK } from "./sdk";
+import { DipCoinPerpSDKOptions } from "./types";
 
 /**
  * Initialize DipCoin Perpetual Trading SDK

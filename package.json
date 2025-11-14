@@ -23,7 +23,7 @@
     "test": "jest",
     "clean": "rm -rf dist build package",
     "ts-node": "ts-node",
-    "example": "ts-node --project tsconfig.example.json examples/basic-usage.ts",
+    "example": "tsx examples/basic-usage.ts",
     "docs": "typedoc --entryPoints src/index.ts",
     "build-ts": "tsc -p tsconfig.json",
     "build": "rm -rf dist; rollup -c rollup.config.js"
@@ -51,9 +51,9 @@
   "devDependencies": {
     "@rollup/plugin-typescript": "^8.5.0",
     "@types/jest": "^28.1.1",
+    "@types/node": "^20.8.10",
     "@typescript-eslint/eslint-plugin": "^5.26.0",
     "@typescript-eslint/parser": "^5.26.0",
-    "@types/node": "^20.8.10",
     "dotenv": "^16.1.4",
     "eslint": "^8.16.0",
     "eslint-config-prettier": "^8.5.0",
@@ -63,7 +63,7 @@
     "rollup": "^2.79.0",
     "ts-jest": "^28.0.4",
     "ts-node": "^10.9.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.0.4"
   }
 }
-

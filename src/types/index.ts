@@ -1,7 +1,6 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
-import BigNumber from "bignumber.js";
 
 /**
  * SDK Configuration Interface

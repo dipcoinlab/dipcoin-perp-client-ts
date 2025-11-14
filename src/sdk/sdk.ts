@@ -17,6 +17,8 @@ import {
   PositionsResponse,
   OpenOrdersResponse,
   OrderType,
+  TradingPair,
+  TradingPairsResponse,
 } from "../types";
 import { HttpClient } from "../services/httpClient";
 import { API_ENDPOINTS, ONBOARDING_MESSAGE } from "../constants";
@@ -210,18 +212,25 @@ export class DipCoinPerpSDK {
         slOrderPrice = "",
       } = params;
 
+      // Validate market parameter - it must be a PerpetualID, not a symbol
+      if (!market) {
+        throw new Error(
+          "Market (PerpetualID) is required. Please provide the market parameter with the PerpetualID for the trading pair."
+        );
+      }
+
       // Convert to BigNumber for calculations
-      const priceBN = price
-        ? formatNormalToWeiBN(price)
-        : new BigNumber(0);
+      // For MARKET orders, price can be empty string, which will be converted to 0
+      const priceBN = price && price !== "" ? formatNormalToWeiBN(price) : new BigNumber(0);
       const quantityBN = formatNormalToWeiBN(quantity);
       const leverageBN = formatNormalToWeiBN(leverage);
       const expirationBN = new BigNumber(0);
       const saltBN = new BigNumber(Date.now());
 
       // Build main order object
+      // Note: market must be the PerpetualID (e.g., "0xc1b1cf3d774bcfcbd6d71158a4259f2d99fccbf64ffc34f32700f8a771587d99")
       const order = {
-        market: market || symbol, // Use market if provided, otherwise use symbol
+        market: market,
         creator: this.walletAddress,
         isLong: side === "BUY",
         reduceOnly,
@@ -252,7 +261,7 @@ export class DipCoinPerpSDK {
           price:
             tpOrderType === OrderType.LIMIT
               ? formatNormalToWeiBN(tpOrderPrice || tpTriggerPrice)
-              : new BigNumber(0),
+              : formatNormalToWeiBN(""), // Use formatNormalToWeiBN('') for MARKET orders to match ts-frontend
           leverage: leverageBN,
           expiration: expirationBN,
           salt: tpSalt,
@@ -276,7 +285,7 @@ export class DipCoinPerpSDK {
           price:
             slOrderType === OrderType.LIMIT
               ? formatNormalToWeiBN(slOrderPrice || slTriggerPrice)
-              : new BigNumber(0),
+              : formatNormalToWeiBN(""), // Use formatNormalToWeiBN('') for MARKET orders to match ts-frontend
           leverage: leverageBN,
           expiration: expirationBN,
           salt: slSalt,
@@ -379,7 +388,8 @@ export class DipCoinPerpSDK {
       } else {
         return {
           status: false,
-          error: response.message || "Failed to place order",
+          error: response.message || "Order failed",
+          data: response,
         };
       }
     } catch (error) {
@@ -464,7 +474,8 @@ export class DipCoinPerpSDK {
       } else {
         return {
           status: false,
-          error: response.message || "Failed to cancel order",
+          error: response.message || "Cancellation Failed",
+          data: response,
         };
       }
     } catch (error) {
@@ -618,6 +629,91 @@ export class DipCoinPerpSDK {
         status: false,
         error: formatError(error),
       };
+    }
+  }
+
+  /**
+   * Get trading pairs list
+   * This can be used to find the PerpetualID (perpId) for a given symbol
+   * @returns Trading pairs response
+   */
+  async getTradingPairs(): Promise<SDKResponse<TradingPair[]>> {
+    try {
+      // Ensure authenticated before making request
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return {
+          status: false,
+          error: authResult.error || "Authentication failed",
+        };
+      }
+
+      const response = await this.httpClient.get<TradingPairsResponse>(
+        API_ENDPOINTS.GET_TRADING_PAIRS
+      );
+
+      // Handle JWT expiration
+      if (response.code === 1000) {
+        this.clearAuth();
+        const retryAuth = await this.authenticate();
+        if (retryAuth.status) {
+          const retryResponse = await this.httpClient.get<TradingPairsResponse>(
+            API_ENDPOINTS.GET_TRADING_PAIRS
+          );
+          if (retryResponse.code === 200) {
+            const pairs = Array.isArray(retryResponse.data)
+              ? retryResponse.data
+              : retryResponse.data?.data || [];
+            return {
+              status: true,
+              data: pairs,
+            };
+          }
+        }
+        return {
+          status: false,
+          error: "Authentication expired and refresh failed",
+        };
+      }
+
+      if (response.code === 200) {
+        const pairs = Array.isArray(response.data)
+          ? response.data
+          : response.data?.data || [];
+        return {
+          status: true,
+          data: pairs,
+        };
+      } else {
+        return {
+          status: false,
+          error: response.message || "Failed to get trading pairs",
+        };
+      }
+    } catch (error) {
+      return {
+        status: false,
+        error: formatError(error),
+      };
+    }
+  }
+
+  /**
+   * Get PerpetualID for a given symbol
+   * @param symbol Trading symbol (e.g., "BTC-PERP")
+   * @returns PerpetualID or null if not found
+   */
+  async getPerpetualID(symbol: string): Promise<string | null> {
+    try {
+      const pairsResult = await this.getTradingPairs();
+      if (pairsResult.status && pairsResult.data) {
+        const pair = pairsResult.data.find((p) => p.symbol === symbol);
+        return pair?.perpId || null;
+      }
+      return null;
+    } catch (error) {
+      console.error("Error getting PerpetualID:", error);
+      return null;
     }
   }
 

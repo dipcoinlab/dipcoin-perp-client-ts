@@ -20,7 +20,7 @@ try {
   // dotenv is optional, continue without it
 }
 
-import { initDipCoinPerpSDK } from "../src";
+import { initDipCoinPerpSDK, OrderSide, OrderType } from "../src";
 
 async function main() {
   // Initialize SDK with private key
@@ -93,40 +93,113 @@ async function main() {
       console.error("Failed to get open orders:", openOrders.error);
     }
 
-    // 4. Place a market order (commented out to prevent accidental orders)
-    /*
+    // 4. Get trading pairs and PerpetualID
+    console.log("\n=== Getting Trading Pairs ===");
+    const tradingPairsResult = await sdk.getTradingPairs();
+    if (tradingPairsResult.status && tradingPairsResult.data) {
+      console.log(`✅ Found ${tradingPairsResult.data.length} trading pairs`);
+      console.log("\nAvailable trading pairs:");
+      tradingPairsResult.data.slice(0, 10).forEach((pair) => {
+        console.log(`  - ${pair.symbol}: PerpetualID = ${pair.perpId}`);
+      });
+      if (tradingPairsResult.data.length > 10) {
+        console.log(`  ... and ${tradingPairsResult.data.length - 10} more`);
+      }
+    } else {
+      console.error("❌ Failed to get trading pairs:", tradingPairsResult.error);
+      console.error("Cannot proceed with placing order without PerpetualID");
+      return;
+    }
+
+    // 5. Get PerpetualID for BTC-PERP
+    const symbolToTrade = "BTC-PERP";
+    console.log(`\n=== Getting PerpetualID for ${symbolToTrade} ===`);
+    const perpetualId = await sdk.getPerpetualID(symbolToTrade);
+    
+    if (!perpetualId) {
+      console.error(`❌ Error: Could not find PerpetualID for ${symbolToTrade}`);
+      console.error("Available symbols:");
+      if (tradingPairsResult.status && tradingPairsResult.data) {
+        tradingPairsResult.data.forEach((pair) => {
+          console.error(`  - ${pair.symbol}`);
+        });
+      }
+      return;
+    }
+    
+    console.log(`✅ Found PerpetualID for ${symbolToTrade}: ${perpetualId}`);
+
+    // 6. Place a market order
     console.log("\n=== Placing Market Order ===");
     const orderResult = await sdk.placeOrder({
-      symbol: "BTC-PERP",
+      symbol: symbolToTrade,
+      market: perpetualId, // REQUIRED: PerpetualID for the trading pair
       side: OrderSide.BUY,
       orderType: OrderType.MARKET,
       quantity: "0.01",
       leverage: "10",
     });
 
-    if (orderResult.status) {
-      console.log("Order placed successfully:", orderResult.data);
+    if (orderResult.status && orderResult.data) {
+      console.log("✅ Order placed successfully!");
+      console.log("Response Code:", orderResult.data.code);
+      console.log("Response Message:", orderResult.data.message || "N/A");
+      if (orderResult.data.data) {
+        console.log("Order Data:", JSON.stringify(orderResult.data.data, null, 2));
+      }
     } else {
-      console.error("Failed to place order:", orderResult.error);
-    }
-    */
-
-    // 5. Cancel an order (example)
-    /*
-    if (openOrders.status && openOrders.data && openOrders.data.length > 0) {
-      console.log("\n=== Cancelling Order ===");
-      const cancelResult = await sdk.cancelOrder({
-        symbol: openOrders.data[0].symbol,
-        orderHashes: [openOrders.data[0].hash],
-      });
-
-      if (cancelResult.status) {
-        console.log("Order cancelled successfully");
-      } else {
-        console.error("Failed to cancel order:", cancelResult.error);
+      console.error("❌ Failed to place order:", orderResult.error);
+      if (orderResult.data) {
+        console.error("Response Code:", orderResult.data.code);
+        console.error("Response Message:", orderResult.data.message || "N/A");
+        console.error("Full Response:", JSON.stringify(orderResult.data, null, 2));
       }
     }
-    */
+
+    // 7. Get updated open orders after placing order
+    console.log("\n=== Getting Updated Open Orders ===");
+    const updatedOrders = await sdk.getOpenOrders();
+    if (updatedOrders.status && updatedOrders.data) {
+      console.log(`Found ${updatedOrders.data.length} open orders`);
+      updatedOrders.data.forEach((order) => {
+        console.log(
+          `- ${order.symbol}: ${order.side} ${order.orderType} ${order.quantity} @ ${order.price} (Hash: ${order.hash})`
+        );
+      });
+
+      // 8. Cancel an order if there are any open orders
+      if (updatedOrders.data.length > 0) {
+        console.log("\n=== Cancelling Order ===");
+        const orderToCancel = updatedOrders.data[0];
+        console.log(`Attempting to cancel order: ${orderToCancel.symbol} - Hash: ${orderToCancel.hash}`);
+        
+        const cancelResult = await sdk.cancelOrder({
+          symbol: orderToCancel.symbol,
+          orderHashes: [orderToCancel.hash],
+        });
+
+        if (cancelResult.status && cancelResult.data) {
+          console.log("✅ Order cancelled successfully!");
+          console.log("Response Code:", cancelResult.data.code);
+          console.log("Response Message:", cancelResult.data.message || "N/A");
+          console.log("Cancelled Order Hash:", orderToCancel.hash);
+          if (cancelResult.data.data) {
+            console.log("Cancel Response Data:", JSON.stringify(cancelResult.data.data, null, 2));
+          }
+        } else {
+          console.error("❌ Failed to cancel order:", cancelResult.error);
+          if (cancelResult.data) {
+            console.error("Response Code:", cancelResult.data.code);
+            console.error("Response Message:", cancelResult.data.message || "N/A");
+            console.error("Full Response:", JSON.stringify(cancelResult.data, null, 2));
+          }
+        }
+      } else {
+        console.log("No open orders to cancel");
+      }
+    } else {
+      console.error("Failed to get updated open orders:", updatedOrders.error);
+    }
   } catch (error) {
     console.error("Error:", error);
   }

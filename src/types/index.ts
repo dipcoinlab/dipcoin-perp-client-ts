@@ -23,6 +23,26 @@ export enum OrderSide {
 }
 
 /**
+ * Trading pair information
+ */
+export interface TradingPair {
+  symbol: string;
+  perpId: string; // PerpetualID
+  coinName?: string;
+  maxLeverage?: string;
+  [key: string]: any; // Allow additional fields
+}
+
+/**
+ * Trading pairs response
+ */
+export interface TradingPairsResponse {
+  code: number;
+  data: TradingPair[];
+  message?: string;
+}
+
+/**
  * Order type (MARKET or LIMIT)
  */
 export enum OrderType {
@@ -46,8 +66,8 @@ export interface PlaceOrderParams {
   price?: number | string;
   /** Leverage multiplier */
   leverage: number | string;
-  /** Market ID (PerpetualID), optional, will be derived from symbol if not provided */
-  market?: string;
+  /** Market ID (PerpetualID) - REQUIRED. This is the PerpetualID for the trading pair (e.g., "0xc1b1cf3d774bcfcbd6d71158a4259f2d99fccbf64ffc34f32700f8a771587d99") */
+  market: string;
   /** Reduce only flag - order will only reduce position, not increase */
   reduceOnly?: boolean;
   /** Client order ID for tracking */

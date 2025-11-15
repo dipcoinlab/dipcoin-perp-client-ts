@@ -137,7 +137,7 @@ async function main() {
       side: OrderSide.BUY,
       orderType: OrderType.MARKET,
       quantity: "0.01",
-      leverage: "10",
+      leverage: "20",
     });
 
     if (orderResult.status && orderResult.data) {

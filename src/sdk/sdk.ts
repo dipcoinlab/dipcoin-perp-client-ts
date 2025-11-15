@@ -1,33 +1,33 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
-import { Keypair } from "@mysten/sui/cryptography";
 import { OrderSigner } from "@dipcoinlab/perp-ts-library";
+import { Keypair } from "@mysten/sui/cryptography";
 import BigNumber from "bignumber.js";
+import { API_ENDPOINTS, ONBOARDING_MESSAGE } from "../constants";
+import { HttpClient } from "../services/httpClient";
 import {
-  DipCoinPerpSDKOptions,
-  PlaceOrderParams,
-  CancelOrderParams,
-  SDKResponse,
   AccountInfo,
-  Position,
-  OpenOrder,
-  OrderResponse,
   AccountInfoResponse,
-  PositionsResponse,
+  CancelOrderParams,
+  DipCoinPerpSDKOptions,
+  OpenOrder,
   OpenOrdersResponse,
+  OrderResponse,
   OrderType,
+  PlaceOrderParams,
+  Position,
+  PositionsResponse,
+  SDKResponse,
   TradingPair,
   TradingPairsResponse,
 } from "../types";
-import { HttpClient } from "../services/httpClient";
-import { API_ENDPOINTS, ONBOARDING_MESSAGE } from "../constants";
 import {
+  formatError,
   formatNormalToWei,
   formatNormalToWeiBN,
-  signMessage,
-  formatError,
   fromExportedKeypair,
+  signMessage,
 } from "../utils";
 
 /**
@@ -225,7 +225,7 @@ export class DipCoinPerpSDK {
       const quantityBN = formatNormalToWeiBN(quantity);
       const leverageBN = formatNormalToWeiBN(leverage);
       const expirationBN = new BigNumber(0);
-      const saltBN = new BigNumber(Date.now());
+      const saltBN = new BigNumber(+new Date());
 
       // Build main order object
       // Note: market must be the PerpetualID (e.g., "0xc1b1cf3d774bcfcbd6d71158a4259f2d99fccbf64ffc34f32700f8a771587d99")
@@ -321,12 +321,12 @@ export class DipCoinPerpSDK {
         side,
         orderType,
         quantity: formatNormalToWei(quantity),
-        price: orderType === OrderType.LIMIT && price ? formatNormalToWei(price) : "",
+        price: orderType === OrderType.LIMIT && price ? formatNormalToWei(price) : "0",
         leverage: formatNormalToWei(leverage),
         salt: saltBN.toString(),
         creator: this.walletAddress,
         clientId,
-        reduceOnly: reduceOnly.toString(),
+        reduceOnly,
         orderSignature,
       };
 
@@ -356,6 +356,7 @@ export class DipCoinPerpSDK {
         API_ENDPOINTS.PLACE_ORDER,
         requestParams
       );
+      console.log("🚀 ~ DipCoinPerpSDK ~ placeOrder ~ requestParams:", requestParams)
 
       // Handle JWT expiration
       if (response.code === 1000) {

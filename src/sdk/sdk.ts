@@ -440,9 +440,11 @@ export class DipCoinPerpSDK {
       const signature = await signMessage(this.keypair, orderHashBytes);
 
       // Build request parameters
+      // Match ts-frontend and Java: orderHashes should be an array, not a JSON string
+      // JSON POST request will automatically serialize the array
       const requestParams = {
         symbol,
-        orderHashes: JSON.stringify(orderHashes),
+        orderHashes, // Direct array, not JSON.stringify
         signature,
         parentAddress,
       };

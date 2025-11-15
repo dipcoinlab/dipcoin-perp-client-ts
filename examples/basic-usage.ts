@@ -170,7 +170,7 @@ async function main() {
       // 8. Cancel an order if there are any open orders
       if (updatedOrders.data.length > 0) {
         console.log("\n=== Cancelling Order ===");
-        const orderToCancel = updatedOrders.data[0];
+        const orderToCancel = updatedOrders.data[1];
         console.log(`Attempting to cancel order: ${orderToCancel.symbol} - Hash: ${orderToCancel.hash}`);
         
         const cancelResult = await sdk.cancelOrder({

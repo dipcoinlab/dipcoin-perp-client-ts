@@ -1,10 +1,11 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
+import { ExchangeOnChain, OrderSigner } from "@dipcoinlab/perp-ts-library";
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { Keypair } from "@mysten/sui/cryptography";
-import { ORDER_TYPE, OrderSigner, ExchangeOnChain, network } from "@dipcoinlab/perp-ts-library";
 import BigNumber from "bignumber.js";
-import { API_ENDPOINTS, ONBOARDING_MESSAGE } from "../constants";
+import { API_ENDPOINTS, DECIMALS, ONBOARDING_MESSAGE } from "../constants";
 import { HttpClient } from "../services/httpClient";
 import {
   AccountInfo,
@@ -13,26 +14,26 @@ import {
   DipCoinPerpSDKOptions,
   OpenOrder,
   OpenOrdersResponse,
+  OrderBook,
+  OrderBookEntry,
   OrderResponse,
+  OrderSide,
   OrderType,
   PlaceOrderParams,
   Position,
   PositionsResponse,
   SDKResponse,
   TradingPair,
-  TradingPairsResponse,
-  OrderSide,
+  TradingPairsResponse
 } from "../types";
 import {
   formatError,
   formatNormalToWei,
   formatNormalToWeiBN,
   fromExportedKeypair,
-  signMessage,
   readFile,
+  signMessage,
 } from "../utils";
-import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
-import { DECIMALS } from "../constants";
 
 /**
  * DipCoin Perpetual Trading SDK
@@ -804,6 +805,188 @@ export class DipCoinPerpSDK {
         status: false,
         error: formatError(error),
       };
+    }
+  }
+
+  /**
+   * Get order book for a trading pair
+   * @param symbol Trading symbol (e.g., "BTC-PERP")
+   * @returns Order book response with bids and asks
+   * @example
+   * ```typescript
+   * const orderBook = await sdk.getOrderBook("BTC-PERP");
+   * if (orderBook.status && orderBook.data) {
+   *   console.log("Bids:", orderBook.data.bids);
+   *   console.log("Asks:", orderBook.data.asks);
+   * }
+   * ```
+   */
+  async getOrderBook(symbol: string): Promise<SDKResponse<OrderBook>> {
+    try {
+      if (!symbol) {
+        return {
+          status: false,
+          error: "Symbol is required",
+        };
+      }
+
+      // Market API endpoints typically don't require authentication
+      // But we'll try to authenticate if possible for consistency
+      // If authentication fails, we'll still try to fetch the order book
+      await this.authenticate().catch(() => {
+        // Ignore authentication errors for market data
+      });
+
+      const params: Record<string, any> = {
+        symbol,
+      };
+
+      const response = await this.httpClient.get<any>(
+        API_ENDPOINTS.GET_ORDER_BOOK,
+        { params }
+      );
+
+      if (response.code === 200 && response.data) {
+        // Extract order book data from response
+        // Match Java client: OrderBookResponse has bids and asks as List<List<String>>
+        // Format: [[price, quantity, orderNum], ...]
+        let rawData = response.data;
+        
+        // Handle nested response structure
+        if ((rawData as any).data) {
+          rawData = (rawData as any).data;
+        }
+
+        // Validate structure
+        if (!rawData || !Array.isArray(rawData.bids) || !Array.isArray(rawData.asks)) {
+          return {
+            status: false,
+            error: "Invalid order book data structure",
+          };
+        }
+
+        // Process bids and asks from array format to OrderBookEntry format
+        // Match ts-frontend: processOrderBookEntries converts [price, quantity, orderNum] to {price, quantity}
+        const bids = this.processOrderBookEntries(rawData.bids, "bids");
+        const asks = this.processOrderBookEntries(rawData.asks, "asks");
+
+        const orderBook: OrderBook = {
+          symbol,
+          bids,
+          asks,
+          timestamp: Date.now(),
+        };
+
+        return {
+          status: true,
+          data: orderBook,
+        };
+      } else {
+        return {
+          status: false,
+          error: response.message || "Failed to get order book",
+        };
+      }
+    } catch (error) {
+      return {
+        status: false,
+        error: formatError(error),
+      };
+    }
+  }
+
+  /**
+   * Process order book entries from API format to OrderBookEntry format
+   * Match ts-frontend: processOrderBookEntries method
+   * @param entries Raw entries from API (array of [price, quantity, orderNum] or objects)
+   * @param side "bids" or "asks"
+   * @returns Processed OrderBookEntry array
+   */
+  private processOrderBookEntries(
+    entries: any[],
+    side: "bids" | "asks"
+  ): OrderBookEntry[] {
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+
+    return entries
+      .filter((entry) => {
+        // Check if it's array format [price, quantity, orderNum]
+        if (Array.isArray(entry) && entry.length >= 2) {
+          const [price, quantity] = entry;
+          return (
+            price &&
+            quantity &&
+            !isNaN(parseFloat(String(price))) &&
+            !isNaN(parseFloat(String(quantity))) &&
+            parseFloat(String(quantity)) > 0
+          );
+        }
+        // Check if it's object format {price, quantity}
+        if (entry && entry.price && entry.quantity) {
+          return (
+            !isNaN(parseFloat(String(entry.price))) &&
+            !isNaN(parseFloat(String(entry.quantity))) &&
+            parseFloat(String(entry.quantity)) > 0
+          );
+        }
+        return false;
+      })
+      .map((entry) => {
+        let price: string, quantity: string;
+
+        // Handle array format [price, quantity, orderNum]
+        if (Array.isArray(entry) && entry.length >= 2) {
+          [price, quantity] = entry;
+        } else {
+          // Handle object format {price, quantity}
+          price = entry.price;
+          quantity = entry.quantity;
+        }
+
+        // Convert from wei to normal units (18 decimals)
+        // Match ts-frontend: formatWeiToNormal converts wei to normal units
+        const formattedPrice = this.formatWeiToNormal(price);
+        const formattedQuantity = this.formatWeiToNormal(quantity);
+
+        return {
+          price: formattedPrice,
+          quantity: formattedQuantity,
+        };
+      })
+      .sort((a, b) => {
+        const priceA = parseFloat(a.price);
+        const priceB = parseFloat(b.price);
+
+        // Bids: sort descending (highest price first)
+        // Asks: sort ascending (lowest price first)
+        // Match ts-frontend: bids descending, asks ascending
+        if (side === "bids") {
+          return priceB - priceA; // Descending for bids
+        } else {
+          return priceA - priceB; // Ascending for asks
+        }
+      });
+  }
+
+  /**
+   * Format wei value to normal units (18 decimals)
+   * Match ts-frontend: formatWeiToNormal function
+   * @param value Value in wei (string or number)
+   * @param decimals Number of decimals (default 18)
+   * @returns Formatted string in normal units
+   */
+  private formatWeiToNormal(value: number | string, decimals = 18): string {
+    try {
+      const bn = new BigNumber(value);
+      if (bn.isNaN() || bn.isZero()) {
+        return "0";
+      }
+      return bn.dividedBy(new BigNumber(10).pow(decimals)).toString();
+    } catch (error) {
+      console.error("Error converting wei to normal:", error);
+      return "0";
     }
   }
 

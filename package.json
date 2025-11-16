@@ -25,6 +25,7 @@
     "ts-node": "ts-node",
     "example": "tsx examples/basic-usage.ts",
     "example:limit": "tsx examples/limit-order.ts",
+    "example:orderbook": "tsx examples/orderbook.ts",
     "docs": "typedoc --entryPoints src/index.ts",
     "build-ts": "tsc -p tsconfig.json",
     "build": "rm -rf dist; rollup -c rollup.config.js; mkdir -p dist/config/deployed/mainnet dist/config/deployed/testnet; cp -r src/config/deployed/* dist/config/deployed/"

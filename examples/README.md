@@ -30,6 +30,18 @@ Limit order example demonstrating how to place LIMIT orders:
 - ✅ Place LIMIT order (price required)
 - ✅ Query open orders
 
+### orderbook.ts
+
+OrderBook example demonstrating how to get market order book data:
+
+- ✅ Initialize SDK
+- ✅ Authentication (Onboarding)
+- ✅ Get trading pairs list
+- ✅ Get OrderBook for a specific trading pair
+- ✅ Display bids (buy orders) and asks (sell orders)
+- ✅ Calculate market spread and mid price
+- ✅ Get OrderBook for multiple symbols
+
 ## Running Examples
 
 ### Prerequisites
@@ -57,9 +69,13 @@ npm run example
 # Run limit order example
 npm run example:limit
 
+# Run orderbook example
+npm run example:orderbook
+
 # Or use tsx directly
 tsx examples/basic-usage.ts
 tsx examples/limit-order.ts
+tsx examples/orderbook.ts
 ```
 
 ## Example Instructions
@@ -173,7 +189,45 @@ const result = await sdk.placeOrder({
 });
 ```
 
-### 7. Cancel Order (Manual Enable Required)
+### 7. Get OrderBook
+
+Get the order book (bids and asks) for a trading pair:
+
+```typescript
+const orderBook = await sdk.getOrderBook("BTC-PERP");
+if (orderBook.status && orderBook.data) {
+  console.log("Bids (Buy Orders):", orderBook.data.bids);
+  console.log("Asks (Sell Orders):", orderBook.data.asks);
+  
+  // Access best bid and ask
+  if (orderBook.data.bids.length > 0) {
+    const bestBid = orderBook.data.bids[0];
+    console.log(`Best Bid: ${bestBid.price}, Quantity: ${bestBid.quantity}`);
+  }
+  
+  if (orderBook.data.asks.length > 0) {
+    const bestAsk = orderBook.data.asks[0];
+    console.log(`Best Ask: ${bestAsk.price}, Quantity: ${bestAsk.quantity}`);
+  }
+  
+  // Calculate spread
+  if (orderBook.data.bids.length > 0 && orderBook.data.asks.length > 0) {
+    const bestBid = parseFloat(orderBook.data.bids[0].price);
+    const bestAsk = parseFloat(orderBook.data.asks[0].price);
+    const spread = bestAsk - bestBid;
+    const midPrice = (bestBid + bestAsk) / 2;
+    console.log(`Spread: ${spread}, Mid Price: ${midPrice}`);
+  }
+}
+```
+
+**Note:**
+- OrderBook is market data and may not require authentication
+- Bids are sorted from highest to lowest price
+- Asks are sorted from lowest to highest price
+- Useful for analyzing market depth and liquidity
+
+### 8. Cancel Order (Manual Enable Required)
 
 Uncomment the code to test order cancellation:
 

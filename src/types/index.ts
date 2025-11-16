@@ -282,3 +282,36 @@ export interface OpenOrdersResponse {
   total?: number;
 }
 
+/**
+ * Order book entry (price and quantity)
+ */
+export interface OrderBookEntry {
+  /** Price level */
+  price: string;
+  /** Quantity at this price level */
+  quantity: string;
+}
+
+/**
+ * Order book data
+ */
+export interface OrderBook {
+  /** Buy orders (bids) - sorted from highest to lowest price */
+  bids: OrderBookEntry[];
+  /** Sell orders (asks) - sorted from lowest to highest price */
+  asks: OrderBookEntry[];
+  /** Optional timestamp */
+  timestamp?: number;
+  /** Optional symbol */
+  symbol?: string;
+}
+
+/**
+ * Order book response
+ */
+export interface OrderBookResponse {
+  code: number;
+  data: OrderBook;
+  message?: string;
+}
+

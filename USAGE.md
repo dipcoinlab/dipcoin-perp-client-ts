@@ -106,12 +106,15 @@ Sui private keys support the following formats:
 
 The `examples/tpsl-example.ts` script accepts the following optional variables:
 
-| Variable            | Description                                                                 |
-| ------------------- | --------------------------------------------------------------------------- |
-| `RUN_TPSL_DEMO`     | Set to `1` to actually place TP/SL orders (default: orders are not created) |
-| `TPSL_SYMBOL`       | Override trading pair symbol (default: `BTC-PERP`)                           |
-| `POSITION_ID`       | Position ID used when fetching TP/SL orders                                  |
-| `TPSL_CANCEL_HASH`  | Existing TP/SL order hash to cancel                                          |
+| Variable               | Description                                                                   |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `RUN_TPSL_DEMO`        | Set to `1` to actually place TP/SL orders (default: orders are not created)   |
+| `RUN_TPSL_EDIT`        | Set to `1` to edit existing TP/SL orders when plan IDs are provided           |
+| `TPSL_SYMBOL`          | Override trading pair symbol (default: `BTC-PERP`)                             |
+| `POSITION_ID`          | Position ID used when fetching TP/SL orders                                    |
+| `TPSL_CANCEL_HASH`     | Existing TP/SL order hash to cancel                                            |
+| `TPSL_EDIT_TP_PLAN_ID` | Plan ID of an existing take-profit order to edit (used with `RUN_TPSL_EDIT`)   |
+| `TPSL_EDIT_SL_PLAN_ID` | Plan ID of an existing stop-loss order to edit (used with `RUN_TPSL_EDIT`)     |
 
 These variables let you test TP/SL flows safely without accidentally creating
 orders until you explicitly opt in.

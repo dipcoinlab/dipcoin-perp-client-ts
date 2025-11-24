@@ -106,6 +106,48 @@ async function main() {
     );
   }
 
+  // Optional: edit TP/SL orders when plan IDs are provided
+  const editTpPlanId = process.env.TPSL_EDIT_TP_PLAN_ID;
+  const editSlPlanId = process.env.TPSL_EDIT_SL_PLAN_ID;
+  if (process.env.RUN_TPSL_EDIT === "1" && (editTpPlanId || editSlPlanId)) {
+    console.log("\n=== Editing TP/SL orders ===");
+    const editResult = await sdk.placePositionTpSlOrders({
+      symbol,
+      market: perpId,
+      side: OrderSide.SELL,
+      isLong: false,
+      leverage: "5",
+      quantity: "0.01",
+      tp: editTpPlanId
+        ? {
+            planId: editTpPlanId,
+            triggerPrice: "91000",
+            orderType: OrderType.LIMIT,
+            orderPrice: "91000",
+            tpslType: "position",
+          }
+        : undefined,
+      sl: editSlPlanId
+        ? {
+            planId: editSlPlanId,
+            triggerPrice: "83000",
+            orderType: OrderType.MARKET,
+            tpslType: "position",
+          }
+        : undefined,
+    });
+
+    if (editResult.status) {
+      console.log("✅ TP/SL edit request sent:", editResult.data);
+    } else {
+      console.error("❌ Failed to edit TP/SL orders:", editResult.error);
+    }
+  } else {
+    console.log(
+      "\nℹ️ To edit TP/SL orders set RUN_TPSL_EDIT=1 and TPSL_EDIT_TP_PLAN_ID / TPSL_EDIT_SL_PLAN_ID."
+    );
+  }
+
   // Cancel TP/SL order if hash is provided
   const cancelHash = process.env.TPSL_CANCEL_HASH;
   if (cancelHash) {

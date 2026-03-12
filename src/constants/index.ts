@@ -24,6 +24,17 @@ export const API_ENDPOINTS = {
   GET_ORDER_BOOK: "/api/perp-market-api/orderBook",
   GET_TICKER: "/api/perp-market-api/ticker",
   GET_POSITION_TPSL: "/api/perp-trade-api/plan/position/tpsl",
+  HISTORY_ORDERS: "/api/perp-trade-api/history/orders",
+  FUNDING_SETTLEMENTS: "/api/perp-trade-api/history/funding-settlements",
+  BALANCE_CHANGES: "/api/perp-trade-api/history/balance-changes",
+  ORACLE: "/api/perp-market-api/oracle",
+  VAULTS_BY_CREATOR: "/api/perp-vault-api/public/vaults/by-creator",
+  VAULTS_PUBLIC: "/api/perp-vault-api/public/vaults",
+  // Points & Referral
+  POINT_JOIN_TEAM: "/api/dipcoin-point/team/join",
+  POINT_REFERRAL_LINK: "/api/dipcoin-point/referral/link",
+  POINT_REFERRAL_CHANGE: "/api/dipcoin-point/referral/change",
+  POINT_REFERRAL_INVITEES: "/api/dipcoin-point/referral/invitee",
 } as const;
 
 /**
@@ -55,4 +66,3 @@ export const PYTH_CONFIG = {
     priceServiceUrl: "https://hermes-beta.pyth.network",
   },
 } as const;
-

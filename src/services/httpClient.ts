@@ -1,161 +1,121 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
+import { spawn } from "child_process";
 import { ApiResponse } from "../types";
 
 /**
- * HTTP Client for API requests
+ * HTTP Client using curl to bypass Cloudflare TLS fingerprinting.
+ * Node.js's TLS stack produces a known JA3/JA4 fingerprint that Cloudflare
+ * blocks. System curl uses OpenSSL/SecureTransport with a different fingerprint.
  */
 export class HttpClient {
-  private instance: AxiosInstance;
   private baseURL: string;
   private walletAddress?: string;
   private authToken?: string;
+  private timeout: number = 30;
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
-    this.instance = axios.create({
-      baseURL,
-      timeout: 30000,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
-
-    this.setupInterceptors();
   }
 
-  /**
-   * Check if URL is a perp-trade-api endpoint
-   */
-  private isPerpTradeApiUrl(url?: string): boolean {
-    return url?.startsWith("/api/perp-trade-api") ?? false;
+  private isAuthenticatedUrl(url?: string): boolean {
+    return (
+      (url?.startsWith("/api/perp-trade-api") ?? false) ||
+      (url?.startsWith("/api/dipcoin-point") ?? false)
+    );
   }
 
-  /**
-   * Check if URL is a public endpoint (doesn't require auth)
-   */
   private isPublicEndpoint(url?: string): boolean {
     return url?.includes("/public/") ?? false;
   }
 
-  /**
-   * Setup request and response interceptors
-   */
-  private setupInterceptors(): void {
-    // Request interceptor
-    this.instance.interceptors.request.use(
-      (config) => {
-        // Only add X-Wallet-Address and Authorization headers for /api/perp-trade-api endpoints
-        // Match ts-frontend: only /api/perp-trade-api requests get these headers
-        if (this.isPerpTradeApiUrl(config.url)) {
-          // Add wallet address header if set
-          // Match ts-frontend: always add X-Wallet-Address for perp-trade-api requests
-          if (this.walletAddress && config.headers) {
-            config.headers["X-Wallet-Address"] = this.walletAddress;
-          }
+  private buildHeaders(url: string, contentType: string = "application/json"): Record<string, string> {
+    const headers: Record<string, string> = { "Content-Type": contentType };
 
-          // Add authorization header if set and not a public endpoint
-          // Match ts-frontend: don't add Authorization for /public/ endpoints
-          if (this.authToken && config.headers && !this.isPublicEndpoint(config.url)) {
-            config.headers["Authorization"] = `Bearer ${this.authToken}`;
-          }
-        }
-
-        return config;
-      },
-      (error) => {
-        return Promise.reject(error);
+    if (this.isAuthenticatedUrl(url)) {
+      if (this.walletAddress) {
+        headers["X-Wallet-Address"] = this.walletAddress;
       }
-    );
-
-    // Response interceptor
-    this.instance.interceptors.response.use(
-      (response: AxiosResponse<ApiResponse>) => {
-        // Return the response data directly
-        return response.data as any;
-      },
-      (error) => {
-        // Handle error responses
-        const errorMessage =
-          error.response?.data?.message || error.message || "Request failed";
-        return Promise.reject(new Error(errorMessage));
+      if (this.authToken && !this.isPublicEndpoint(url)) {
+        headers["Authorization"] = `Bearer ${this.authToken}`;
       }
-    );
+    }
+
+    return headers;
   }
 
-  /**
-   * Set wallet address for requests
-   */
+  private curlRequest(method: string, url: string, headers: Record<string, string>, body?: string): Promise<ApiResponse> {
+    return new Promise((resolve, reject) => {
+      const fullUrl = `${this.baseURL}${url}`;
+      const args: string[] = ["-s", "-X", method, fullUrl, "--max-time", String(this.timeout)];
+
+      for (const [key, value] of Object.entries(headers)) {
+        args.push("-H", `${key}: ${value}`);
+      }
+
+      if (body) {
+        args.push("-d", body);
+      }
+
+      const proc = spawn("curl", args);
+      let stdout = "";
+      let stderr = "";
+
+      proc.stdout.on("data", (chunk) => { stdout += chunk; });
+      proc.stderr.on("data", (chunk) => { stderr += chunk; });
+
+      proc.on("close", (code) => {
+        if (!stdout) {
+          return reject(new Error(stderr || `curl exited with code ${code}`));
+        }
+        try {
+          resolve(JSON.parse(stdout));
+        } catch {
+          reject(new Error(`Invalid JSON response: ${stdout.slice(0, 200)}`));
+        }
+      });
+
+      proc.on("error", (err) => reject(err));
+    });
+  }
+
   setWalletAddress(address: string): void {
     this.walletAddress = address;
   }
 
-  /**
-   * Set authorization token
-   */
   setAuthToken(token: string): void {
     this.authToken = token;
   }
 
-  /**
-   * Get axios instance
-   */
-  getInstance(): AxiosInstance {
-    return this.instance;
-  }
-
-  /**
-   * GET request
-   */
-  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    return this.instance.get<ApiResponse<T>>(url, config) as unknown as Promise<ApiResponse<T>>;
-  }
-
-  /**
-   * POST request
-   */
-  async post<T = any>(
-    url: string,
-    data?: any,
-    config?: AxiosRequestConfig
-  ): Promise<ApiResponse<T>> {
-    return this.instance.post<ApiResponse<T>>(url, data, config) as unknown as Promise<ApiResponse<T>>;
-  }
-
-  /**
-   * POST form data request
-   * Match ts-frontend: uses application/x-www-form-urlencoded for form data
-   */
-  async postForm<T = any>(
-    url: string,
-    data: Record<string, any>,
-    config?: AxiosRequestConfig
-  ): Promise<ApiResponse<T>> {
-    const formData = new URLSearchParams();
-    Object.keys(data).forEach((key) => {
-      const value = data[key];
-      if (value !== undefined && value !== null) {
-        if (typeof value === "object") {
-          formData.append(key, JSON.stringify(value));
-        } else {
-          formData.append(key, String(value));
+  async get<T = any>(url: string, config?: { params?: Record<string, any> }): Promise<ApiResponse<T>> {
+    let finalUrl = url;
+    if (config?.params) {
+      const qs = new URLSearchParams();
+      for (const [key, value] of Object.entries(config.params)) {
+        if (value !== undefined && value !== null) {
+          qs.append(key, String(value));
         }
       }
-    });
+      const qsStr = qs.toString();
+      if (qsStr) finalUrl += `?${qsStr}`;
+    }
+    return this.curlRequest("GET", finalUrl, this.buildHeaders(url)) as Promise<ApiResponse<T>>;
+  }
 
-    // Merge headers: form data Content-Type takes precedence, but preserve other headers
-    // Match ts-frontend: form requests use application/x-www-form-urlencoded
-    const headers = {
-      "Content-Type": "application/x-www-form-urlencoded",
-      ...config?.headers,
-    };
+  async post<T = any>(url: string, data?: any): Promise<ApiResponse<T>> {
+    const body = data ? JSON.stringify(data) : undefined;
+    return this.curlRequest("POST", url, this.buildHeaders(url), body) as Promise<ApiResponse<T>>;
+  }
 
-    return this.instance.post<ApiResponse<T>>(url, formData.toString(), {
-      ...config,
-      headers,
-    }) as unknown as Promise<ApiResponse<T>>;
+  async postForm<T = any>(url: string, data: Record<string, any>): Promise<ApiResponse<T>> {
+    const formData = new URLSearchParams();
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && value !== null) {
+        formData.append(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+      }
+    }
+    return this.curlRequest("POST", url, this.buildHeaders(url, "application/x-www-form-urlencoded"), formData.toString()) as Promise<ApiResponse<T>>;
   }
 }
 

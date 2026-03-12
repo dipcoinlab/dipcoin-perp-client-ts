@@ -21,6 +21,7 @@ export function initSDKOptions(
     apiBaseUrl: options.apiBaseUrl || DEFAULT_API_URLS[options.network],
     network: options.network,
     customRpc: options.customRpc,
+    subAccountKey: options.subAccountKey,
   };
 }
 

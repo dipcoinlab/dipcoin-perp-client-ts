@@ -1,6 +1,7 @@
 {
   "deployer": "0xf5fe6a868bae59c109f8fa82a139a5302bd11587c811606e9938cf435b0f3906",
-  "packages": ["0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001"],
+  "packages": ["0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001", "0x3d11bc46bb4fbcdef7d17f69ac10e3a471d8f09cf104f94b5113dc2cd1c44fd2"],
+  "vaultPackage": "0x3d11bc46bb4fbcdef7d17f69ac10e3a471d8f09cf104f94b5113dc2cd1c44fd2",
   "objects": {
     "ExchangeAdminCap": {
       "id": "0x11d6aebffbd2bd7e149bfa73353d8bfa57942e67da0d730fec65b8c8edaaa7fe",
@@ -84,6 +85,12 @@
       "owner": "Shared",
       "id": "0x9c78b1bb63de6ceece5be85a7dd6af77bf57a7a989bb51f27e4a2fbabf0ca2db",
       "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+      "package_version": 1
+    },
+    "VaultConfig": {
+      "id": "0x69bae0c198f83acf12656a247dfe85467819139560968669f14b4df0abe8efd7",
+      "owner": "Shared",
+      "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::vault::VaultConfig",
       "package_version": 1
     }
   },
@@ -541,6 +548,182 @@
         "PriceInfoObject": {
           "owner": "Shared",
           "id": "0x93bfda25cb6b1653a9c769e8216014bd2c06997f3edb479566761fbf2abf6ac2",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "HYPE-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0xcac72eb61b217e69fd501f97928f47b4d4a4f748d4d4d671313c8484fe7d78f2",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x1c047be615eaa5a87afa0e111b20a512dd6c0f4a1f0f691693cf852c1768f35d",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "DOGE-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0xffad6d1e17715e342e29a510eba3e6e3364895fb47b7e1034e227ac93f96cee3",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xd59a5f5173424ba725a7d033d86f2eadf2745f87a908bd27e1d27339eff598ce",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "LTC-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0x3c2fd2048f0fc33d305f0e0d88422e17bf7278f581c11d639b0de42121fa0aaa",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x38bff6edbebb69ebf0c00c085789608986acdcf78186766cce10f0aae18bb465",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "ZEC-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0xcb6d2f125dfd05c31bed5f90fe34f7830ab04d795b4be7f26d5bfc25346d8b82",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xcc0f04f341b08fa9f1079f760d6dee779e6fdd46e50594eb931bce07f80c05d3",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "LINK-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0x20e05ebcf5767d612a3703368f60c75ef143dca7b87b648ebbe8735dedb3bef8",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xd26b7be498beb5e6eb0e99b644021d0e603af12ff58f2728ea87202f2578e5cc",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "AAVE-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0x9631f33dc144dbb734fd719e412650ebebfa2db24e7a3251afb5b11a92efea01",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x4d1862d9ca2ad1f054f606220c22e0bcf37330d57bb82baa2063fd8193fc24ae",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "TRUMP-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0x975975cc3d44b8ce7716b7763c2b6120316a02a0b2344bb1ba98a305b14e9084",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xd0835474be8cfcc7be4e02fc1bcd85dbdf11a54d061edc302e611ca304f57b14",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "PAXG-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0x140c00316ab68f7eab8ab082bc8b4ff7e8111a619f473f89f5cd3c2a28c98a6b",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x78394446b806dcd3b26011b1c7fcfab104f95b718299bc98ff730983105bf943",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "AXS-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0xc305336d6eb9d7abad04972352c428cb6ef285c52cca9b1b7442481cd5bf320f",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x277be485cc4a095733f1e4938b5e0195a1718aaf9951afd5803095b7808016fa",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "TRX-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0xa33248a13df12efaef9d78287df73f0e9983ca2c0a05f13495491644ca29f212",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x34d6e013b9dcb3a899f69dda802af9a8afa2193e4049683479c395ea9a5cfbb8",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "ADA-PERP": {
+      "Objects": {
+        "Perpetual": {
+          "id": "0x0c61742f28acba6a0769f3058cf1c1171fa03bc8385d74162e487d23ae4bc45b",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xf28e4e40a96948a19805fe76a4da373a262daac47588bac78d73033bce7b5a38",
           "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
           "package_version": 1
         }

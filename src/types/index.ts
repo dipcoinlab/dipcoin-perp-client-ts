@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Keypair } from "@mysten/sui/cryptography";
 
 /**
  * SDK Configuration Interface
@@ -12,6 +13,8 @@ export interface DipCoinPerpSDKOptions {
   network: "mainnet" | "testnet";
   /** Optional custom RPC endpoint for Sui */
   customRpc?: string;
+  /** Optional sub-account private key or keypair for trading operations (main/sub separation) */
+  subAccountKey?: string | Keypair;
 }
 
 /**
@@ -88,6 +91,8 @@ export interface PlaceOrderParams {
   reduceOnly?: boolean;
   /** Client order ID for tracking */
   clientId?: string;
+  /** Creator address - can be wallet address or vault address */
+  creator?: string;
   /** Take profit trigger price */
   tpTriggerPrice?: number | string;
   /** Take profit order type */
@@ -127,6 +132,14 @@ export interface AdjustLeverageParams {
 }
 
 /**
+ * Parameters for querying account info
+ */
+export interface AccountInfoParams {
+  /** Vault address for querying vault account */
+  parentAddress?: string;
+}
+
+/**
  * Account information
  */
 export interface AccountInfo {
@@ -140,6 +153,26 @@ export interface AccountInfo {
   freeCollateral: string;
   /** Total margin used */
   totalMargin: string;
+}
+
+/**
+ * Parameters for querying positions
+ */
+export interface PositionsParams {
+  symbol?: string;
+  /** Vault address for querying vault positions */
+  parentAddress?: string;
+}
+
+/**
+ * Parameters for querying open orders
+ */
+export interface OpenOrdersParams {
+  symbol?: string;
+  page?: number;
+  pageSize?: number;
+  /** Vault address for querying vault orders */
+  parentAddress?: string;
 }
 
 /**
@@ -469,6 +502,97 @@ export interface PositionTpSlQueryParams {
  * Cancel TP/SL orders request (alias of CancelOrderParams)
  */
 export type CancelTpSlOrdersParams = CancelOrderParams;
+
+/**
+ * Generic paginated response (matches Java PageResponse)
+ */
+export interface PageResponse<T> {
+  data: T[];
+  pageNum?: number;
+  pageSize?: number;
+  total?: number;
+}
+
+/**
+ * Parameters for querying history orders
+ */
+export interface HistoryOrdersParams {
+  symbol?: string;
+  page?: number;
+  pageSize?: number;
+  parentAddress?: string;
+  beginTime?: number;
+  endTime?: number;
+}
+
+/**
+ * History order data (matches Java HistoryOrdersResponse)
+ */
+export interface HistoryOrder {
+  hash?: string;
+  symbol?: string;
+  side?: string;
+  orderType?: string;
+  price?: string;
+  quantity?: string;
+  filledQty?: string;
+  leverage?: string;
+  status?: string;
+  fee?: string;
+  realizedPnl?: string;
+  createdAt?: number;
+  updatedAt?: number;
+  clientId?: string;
+  reduceOnly?: boolean;
+  [key: string]: any;
+}
+
+/**
+ * Parameters for querying funding settlements
+ */
+export interface FundingSettlementsParams {
+  symbol?: string;
+  page?: number;
+  pageSize?: number;
+  parentAddress?: string;
+  beginTime?: number;
+}
+
+/**
+ * Funding settlement data (matches Java FundingSettlementsResponse)
+ */
+export interface FundingSettlement {
+  symbol?: string;
+  fundingRate?: string;
+  fundingFee?: string;
+  quantity?: string;
+  side?: string;
+  price?: string;
+  createdAt?: number;
+  [key: string]: any;
+}
+
+/**
+ * Parameters for querying balance changes
+ */
+export interface BalanceChangesParams {
+  page?: number;
+  pageSize?: number;
+  parentAddress?: string;
+  beginTime?: number;
+}
+
+/**
+ * Balance change data (matches Java BalanceChangesResponse)
+ */
+export interface BalanceChange {
+  type?: string;
+  amount?: string;
+  balance?: string;
+  symbol?: string;
+  createdAt?: number;
+  [key: string]: any;
+}
 
 /**
  * Ticker information for a trading pair

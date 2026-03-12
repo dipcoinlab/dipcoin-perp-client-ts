@@ -1,70 +1,51 @@
 {
-  "name": "@dipcoinlab/perp-client-ts",
-  "version": "0.5.0",
-  "description": "TypeScript SDK for DipCoin Perpetual Trading on Sui blockchain",
-  "exports": {
-    ".": {
-      "import": "./dist/index.esm.js",
-      "require": "./dist/index.cjs.js",
-      "types": "./dist/index.d.ts"
-    }
+  "name": "dipcoin-cli",
+  "version": "0.8.3",
+  "description": "DipCoin Perpetual Trading CLI",
+  "bin": {
+    "dipcoin-cli": "./dist/cli.cjs"
   },
-  "main": "dist/index.cjs.js",
-  "module": "dist/index.esm.js",
-  "types": "dist/index.d.ts",
-  "typings": "dist/index.d.ts",
   "files": [
     "dist"
   ],
   "author": "dipcoinlab",
   "license": "Apache-2.0",
   "scripts": {
-    "lint": "eslint src/ --ext .js,.jsx,.ts,.tsx",
-    "test": "jest",
+    "lint": "eslint src/ cli/ --ext .js,.jsx,.ts,.tsx",
     "clean": "rm -rf dist build package",
-    "ts-node": "ts-node",
-    "example": "tsx examples/index.ts",
-    "docs": "typedoc --entryPoints src/index.ts",
-    "build-ts": "tsc -p tsconfig.json",
+    "cli": "tsx cli/index.ts",
     "build": "rm -rf dist; rollup -c rollup.config.js; mkdir -p dist/config/deployed/mainnet dist/config/deployed/testnet; cp -r src/config/deployed/* dist/config/deployed/"
   },
   "keywords": [
     "sui",
     "perp",
     "perpetual",
-    "sdk",
     "dipcoin",
     "trading"
   ],
   "dependencies": {
-    "@dipcoinlab/perp-ts-library": "^0.0.17",
     "@mysten/sui": "^1.20.0",
     "@pythnetwork/pyth-sui-js": "^2.4.0",
-    "@rollup/plugin-commonjs": "^28.0.3",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-terser": "^0.4.4",
-    "@types/bignumber.js": "^5.0.4",
-    "@types/node": "^20.8.10",
     "axios": "^1.6.0",
     "bignumber.js": "^9.2.0",
     "buffer": "^6.0.3",
-    "fs": "^0.0.1-security",
-    "path": "^0.12.7"
+    "cli-table3": "^0.6.5",
+    "commander": "^14.0.3",
+    "dotenv": "^16.1.4"
   },
   "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^8.5.0",
-    "@types/jest": "^28.1.1",
+    "@types/bignumber.js": "^5.0.4",
     "@types/node": "^20.8.10",
     "@typescript-eslint/eslint-plugin": "^5.26.0",
     "@typescript-eslint/parser": "^5.26.0",
-    "dotenv": "^16.1.4",
     "eslint": "^8.16.0",
     "eslint-config-prettier": "^8.5.0",
     "eslint-plugin-prettier": "^4.0.0",
-    "jest": "^28.1.1",
     "prettier": "^2.6.2",
     "rollup": "^2.79.0",
-    "ts-jest": "^28.0.4",
     "ts-node": "^10.9.1",
     "tsx": "^4.20.6",
     "typescript": "^5.0.4"

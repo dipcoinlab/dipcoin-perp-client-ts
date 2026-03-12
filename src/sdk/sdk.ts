@@ -1,34 +1,57 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
-import { ExchangeOnChain, OrderSigner, TransactionBuilder } from "@dipcoinlab/perp-ts-library";
 import { SuiClient, SuiTransactionBlockResponse, getFullnodeUrl } from "@mysten/sui/client";
 import { Keypair } from "@mysten/sui/cryptography";
 import { Transaction } from "@mysten/sui/transactions";
+import { initSDKOptions } from "../config";
 import BigNumber from "bignumber.js";
 import { SuiPriceServiceConnection, SuiPythClient } from "@pythnetwork/pyth-sui-js";
 import { API_ENDPOINTS, DECIMALS, ONBOARDING_MESSAGE, PYTH_CONFIG } from "../constants";
 import { HttpClient } from "../services/httpClient";
 import {
+  getOrderMessageForUIWallet,
+  executeTxBlock,
+  getDeploymentPerpetualID,
+  getOraclePrice as getOnChainOraclePrice,
+  depositToBank as onChainDepositToBank,
+  withdrawFromBank as onChainWithdrawFromBank,
+  setSubAccount as onChainSetSubAccount,
+  buildAddMarginTx,
+  buildRemoveMarginTx,
+  buildSetOraclePriceTx,
+  buildBatchSetOraclePriceTx,
+} from "../onchain";
+import {
   AccountInfo,
+  AccountInfoParams,
   AccountInfoResponse,
   AdjustLeverageParams,
+  BalanceChange,
+  BalanceChangesParams,
   CancelOrderParams,
   CancelTpSlOrdersParams,
   DipCoinPerpSDKOptions,
+  FundingSettlement,
+  FundingSettlementsParams,
+  HistoryOrder,
+  HistoryOrdersParams,
   MarginAdjustmentParams,
   OpenOrder,
+  OpenOrdersParams,
   OpenOrdersResponse,
   OrderBook,
   OrderBookEntry,
   OrderResponse,
   OrderSide,
   OrderType,
+  PageResponse,
   PlaceOrderParams,
   PlaceTpSlOrdersParams,
   PlaceTpSlOrdersResult,
   Position,
   PositionTpSlOrder,
+  PositionsParams,
   PositionsResponse,
   SDKResponse,
   Ticker,
@@ -46,6 +69,7 @@ import {
   readFile,
   signMessage,
 } from "../utils";
+import { loadCachedJwt, saveCachedJwt, clearCachedJwt } from "../utils/jwt-cache";
 
 /**
  * DipCoin Perpetual Trading SDK
@@ -53,14 +77,16 @@ import {
 export class DipCoinPerpSDK {
   private httpClient: HttpClient;
   private keypair: Keypair;
+  private subKeypair?: Keypair;
   private walletAddress: string;
+  private subAddress?: string;
   private options: DipCoinPerpSDKOptions;
   private jwtToken?: string;
+  private subJwtToken?: string;
   private isAuthenticating: boolean = false;
-  private exchangeOnChain: ExchangeOnChain;
+  private isSubAuthenticating: boolean = false;
   private deploymentConfig: any;
   private suiClient: SuiClient;
-  private transactionBuilder: TransactionBuilder;
   private priceServiceConnection?: SuiPriceServiceConnection;
   private pythClient?: SuiPythClient;
   private tradingPairsCache?: TradingPair[];
@@ -75,11 +101,21 @@ export class DipCoinPerpSDK {
     this.options = options;
     this.httpClient = new HttpClient(options.apiBaseUrl);
 
-    // Initialize keypair
+    // Initialize main keypair
     if (typeof privateKey === "string") {
       this.keypair = fromExportedKeypair(privateKey);
     } else {
       this.keypair = privateKey;
+    }
+
+    // Initialize sub-account keypair if provided
+    if (options.subAccountKey) {
+      if (typeof options.subAccountKey === "string") {
+        this.subKeypair = fromExportedKeypair(options.subAccountKey);
+      } else {
+        this.subKeypair = options.subAccountKey;
+      }
+      this.subAddress = this.subKeypair.getPublicKey().toSuiAddress();
     }
 
     // Get wallet address
@@ -88,16 +124,6 @@ export class DipCoinPerpSDK {
     this.deploymentConfig = readFile(`config/deployed/${options.network}/main_contract.json`);
     const rpcUrl = options.customRpc || getFullnodeUrl(options.network);
     this.suiClient = new SuiClient({ url: rpcUrl });
-    this.exchangeOnChain = new ExchangeOnChain(this.deploymentConfig, this.suiClient, this.keypair);
-
-    const packageId = this.getDeploymentPackageId();
-    const protocolConfigId = this.getDeploymentProtocolConfigId();
-    this.transactionBuilder = new TransactionBuilder(
-      packageId,
-      protocolConfigId,
-      this.deploymentConfig,
-      this.suiClient as any
-    );
   }
 
   /**
@@ -105,6 +131,13 @@ export class DipCoinPerpSDK {
    */
   get address(): string {
     return this.walletAddress;
+  }
+
+  /**
+   * Get sub-account wallet address (if configured)
+   */
+  get subAccountAddress(): string | undefined {
+    return this.subAddress;
   }
 
   /**
@@ -121,35 +154,32 @@ export class DipCoinPerpSDK {
    */
   async authenticate(): Promise<SDKResponse<string>> {
     try {
-      // If already authenticated and token exists, return it
+      // If already authenticated in this process, return it
       if (this.jwtToken) {
-        return {
-          status: true,
-          data: this.jwtToken,
-        };
+        return { status: true, data: this.jwtToken };
+      }
+
+      // Try loading from local cache
+      const cached = loadCachedJwt(this.walletAddress);
+      if (cached) {
+        this.jwtToken = cached;
+        this.httpClient.setAuthToken(cached);
+        return { status: true, data: cached };
       }
 
       // Prevent concurrent authentication requests
       if (this.isAuthenticating) {
-        // Wait for ongoing authentication
         await new Promise((resolve) => setTimeout(resolve, 100));
         if (this.jwtToken) {
-          return {
-            status: true,
-            data: this.jwtToken,
-          };
+          return { status: true, data: this.jwtToken };
         }
       }
 
       this.isAuthenticating = true;
 
-      // 1. Prepare onboarding message
       const messageBytes = new TextEncoder().encode(ONBOARDING_MESSAGE);
-
-      // 2. Sign the message
       const signature = await signMessage(this.keypair, messageBytes);
 
-      // 3. Call authorize endpoint to get JWT token
       const response = await this.httpClient.post<{ token: string }>(API_ENDPOINTS.AUTHORIZE, {
         userAddress: this.walletAddress,
         isTermAccepted: true,
@@ -159,24 +189,101 @@ export class DipCoinPerpSDK {
       if (response.code === 200 && response.data?.token) {
         this.jwtToken = response.data.token;
         this.httpClient.setAuthToken(this.jwtToken);
+        saveCachedJwt(this.walletAddress, this.jwtToken);
         this.isAuthenticating = false;
-        return {
-          status: true,
-          data: this.jwtToken,
-        };
+        return { status: true, data: this.jwtToken };
       } else {
         this.isAuthenticating = false;
-        return {
-          status: false,
-          error: response.message || "Failed to authenticate",
-        };
+        return { status: false, error: response.message || "Failed to authenticate" };
       }
     } catch (error) {
       this.isAuthenticating = false;
-      return {
-        status: false,
-        error: formatError(error),
-      };
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Authenticate sub-account and get JWT token
+   * Used for trading operations when sub-account is configured
+   */
+  async authenticateSub(): Promise<SDKResponse<string>> {
+    if (!this.subKeypair) {
+      return { status: false, error: "Sub-account keypair not configured" };
+    }
+
+    const subAddress = this.subKeypair.getPublicKey().toSuiAddress();
+
+    try {
+      if (this.subJwtToken) {
+        return { status: true, data: this.subJwtToken };
+      }
+
+      // Try loading from local cache
+      const cached = loadCachedJwt(subAddress);
+      if (cached) {
+        this.subJwtToken = cached;
+        return { status: true, data: cached };
+      }
+
+      if (this.isSubAuthenticating) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (this.subJwtToken) {
+          return { status: true, data: this.subJwtToken };
+        }
+      }
+
+      this.isSubAuthenticating = true;
+
+      const messageBytes = new TextEncoder().encode(ONBOARDING_MESSAGE);
+      const signature = await signMessage(this.subKeypair, messageBytes);
+
+      const response = await this.httpClient.post<{ token: string }>(API_ENDPOINTS.AUTHORIZE, {
+        userAddress: subAddress,
+        isTermAccepted: true,
+        signature: signature,
+      });
+
+      if (response.code === 200 && response.data?.token) {
+        this.subJwtToken = response.data.token;
+        saveCachedJwt(subAddress, this.subJwtToken);
+        this.isSubAuthenticating = false;
+        return { status: true, data: this.subJwtToken };
+      } else {
+        this.isSubAuthenticating = false;
+        return { status: false, error: response.message || "Failed to authenticate sub-account" };
+      }
+    } catch (error) {
+      this.isSubAuthenticating = false;
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Authenticate for trading operations
+   * Uses sub-account if configured, otherwise falls back to main account
+   */
+  private async authenticateForTrading(): Promise<SDKResponse<string>> {
+    if (this.subKeypair) {
+      const subAuth = await this.authenticateSub();
+      if (subAuth.status && subAuth.data) {
+        this.httpClient.setAuthToken(subAuth.data);
+        if (this.subAddress) {
+          this.httpClient.setWalletAddress(this.subAddress);
+        }
+        return subAuth;
+      }
+      return subAuth;
+    }
+    return this.authenticate();
+  }
+
+  /**
+   * Restore main account auth context after trading operations
+   */
+  private restoreMainAuth(): void {
+    this.httpClient.setWalletAddress(this.walletAddress);
+    if (this.jwtToken) {
+      this.httpClient.setAuthToken(this.jwtToken);
     }
   }
 
@@ -197,7 +304,10 @@ export class DipCoinPerpSDK {
    * Clear JWT token (logout)
    */
   clearAuth(): void {
+    if (this.jwtToken) clearCachedJwt(this.walletAddress);
+    if (this.subJwtToken && this.subAddress) clearCachedJwt(this.subAddress);
     this.jwtToken = undefined;
+    this.subJwtToken = undefined;
     this.httpClient.setAuthToken("");
   }
 
@@ -208,9 +318,10 @@ export class DipCoinPerpSDK {
    */
   async placeOrder(params: PlaceOrderParams): Promise<SDKResponse<OrderResponse>> {
     try {
-      // Ensure authenticated before making request
-      const authResult = await this.authenticate();
+      // Use sub-account auth for trading if configured
+      const authResult = await this.authenticateForTrading();
       if (!authResult.status) {
+        this.restoreMainAuth();
         return {
           status: false,
           error: authResult.error || "Authentication failed",
@@ -242,6 +353,7 @@ export class DipCoinPerpSDK {
         market,
         reduceOnly = false,
         clientId = "",
+        creator,
         tpTriggerPrice,
         tpOrderType = OrderType.MARKET,
         tpOrderPrice = "",
@@ -249,6 +361,11 @@ export class DipCoinPerpSDK {
         slOrderType = OrderType.MARKET,
         slOrderPrice = "",
       } = params;
+
+      // Resolve creator: explicit creator (vault address), or main wallet address
+      const orderCreator = creator || this.walletAddress;
+      // Use sub-account keypair for signing if available, otherwise main keypair
+      const signingKeypair = this.subKeypair || this.keypair;
 
       // Validate market parameter - it must be a PerpetualID, not a symbol
       if (!market) {
@@ -269,7 +386,7 @@ export class DipCoinPerpSDK {
       // Note: market must be the PerpetualID (e.g., "0xc1b1cf3d774bcfcbd6d71158a4259f2d99fccbf64ffc34f32700f8a771587d99")
       const order = {
         market: market,
-        creator: this.walletAddress,
+        creator: orderCreator,
         isLong: side === OrderSide.BUY,
         reduceOnly,
         postOnly: false,
@@ -289,7 +406,7 @@ export class DipCoinPerpSDK {
         tpSalt = new BigNumber(Date.now() + 1);
         tpOrder = {
           market: order.market,
-          creator: this.walletAddress,
+          creator: orderCreator,
           isLong: !order.isLong,
           reduceOnly: true,
           postOnly: false,
@@ -313,7 +430,7 @@ export class DipCoinPerpSDK {
         slSalt = new BigNumber(Date.now() + 2);
         slOrder = {
           market: order.market,
-          creator: this.walletAddress,
+          creator: orderCreator,
           isLong: !order.isLong,
           reduceOnly: true,
           postOnly: false,
@@ -331,26 +448,26 @@ export class DipCoinPerpSDK {
       }
 
       // Generate order message for signing
-      const orderMsg = OrderSigner.getOrderMessageForUIWallet(order);
+      const orderMsg = getOrderMessageForUIWallet(order);
       const orderHashBytes = new TextEncoder().encode(orderMsg);
 
       // Sign main order
-      const orderSignature = await signMessage(this.keypair, orderHashBytes);
+      const orderSignature = await signMessage(signingKeypair, orderHashBytes);
 
       // Sign TP order if exists
       let tpOrderSignature: string | undefined;
       if (tpOrder) {
-        const tpOrderMsg = OrderSigner.getOrderMessageForUIWallet(tpOrder);
+        const tpOrderMsg = getOrderMessageForUIWallet(tpOrder);
         const tpOrderHashBytes = new TextEncoder().encode(tpOrderMsg);
-        tpOrderSignature = await signMessage(this.keypair, tpOrderHashBytes);
+        tpOrderSignature = await signMessage(signingKeypair, tpOrderHashBytes);
       }
 
       // Sign SL order if exists
       let slOrderSignature: string | undefined;
       if (slOrder) {
-        const slOrderMsg = OrderSigner.getOrderMessageForUIWallet(slOrder);
+        const slOrderMsg = getOrderMessageForUIWallet(slOrder);
         const slOrderHashBytes = new TextEncoder().encode(slOrderMsg);
-        slOrderSignature = await signMessage(this.keypair, slOrderHashBytes);
+        slOrderSignature = await signMessage(signingKeypair, slOrderHashBytes);
       }
 
       // Build request parameters
@@ -361,12 +478,12 @@ export class DipCoinPerpSDK {
         side,
         orderType,
         quantity: formatNormalToWei(quantity),
-        price: formatNormalToWei(price || ""), // Match ts-frontend: always use priceWei
+        price: formatNormalToWei(price || ""),
         leverage: formatNormalToWei(leverage),
         salt: saltBN.toString(),
-        creator: this.walletAddress,
+        creator: orderCreator,
         clientId,
-        reduceOnly, // Will be sent as boolean in JSON
+        reduceOnly,
         orderSignature,
       };
 
@@ -406,13 +523,14 @@ export class DipCoinPerpSDK {
       // Handle JWT expiration
       if (response.code === 1000) {
         this.clearAuth();
-        const retryAuth = await this.authenticate();
+        const retryAuth = await this.authenticateForTrading();
         if (retryAuth.status) {
           // Retry the request
           const retryResponse = await this.httpClient.post<OrderResponse>(
             API_ENDPOINTS.PLACE_ORDER,
             requestParams
           );
+          this.restoreMainAuth();
           if (retryResponse.code === 200) {
             return {
               status: true,
@@ -420,12 +538,14 @@ export class DipCoinPerpSDK {
             };
           }
         }
+        this.restoreMainAuth();
         return {
           status: false,
           error: "Authentication expired and refresh failed",
         };
       }
 
+      this.restoreMainAuth();
       if (response.code === 200) {
         return {
           status: true,
@@ -439,6 +559,7 @@ export class DipCoinPerpSDK {
         };
       }
     } catch (error) {
+      this.restoreMainAuth();
       return {
         status: false,
         error: formatError(error),
@@ -453,9 +574,10 @@ export class DipCoinPerpSDK {
    */
   async cancelOrder(params: CancelOrderParams): Promise<SDKResponse<OrderResponse>> {
     try {
-      // Ensure authenticated before making request
-      const authResult = await this.authenticate();
+      // Use sub-account auth for trading if configured
+      const authResult = await this.authenticateForTrading();
       if (!authResult.status) {
+        this.restoreMainAuth();
         return {
           status: false,
           error: authResult.error || "Authentication failed",
@@ -468,12 +590,15 @@ export class DipCoinPerpSDK {
         throw new Error("Order hashes are required");
       }
 
+      // Use sub-account keypair for signing if available
+      const signingKeypair = this.subKeypair || this.keypair;
+
       // Build cancel order message
       const cancelOrderObj = { orderHashes };
       const orderHashBytes = new TextEncoder().encode(JSON.stringify(cancelOrderObj));
 
       // Sign the message
-      const signature = await signMessage(this.keypair, orderHashBytes);
+      const signature = await signMessage(signingKeypair, orderHashBytes);
 
       // Build request parameters
       // Match ts-frontend and Java: orderHashes should be an array, not a JSON string
@@ -496,13 +621,14 @@ export class DipCoinPerpSDK {
       // Handle JWT expiration
       if (response.code === 1000) {
         this.clearAuth();
-        const retryAuth = await this.authenticate();
+        const retryAuth = await this.authenticateForTrading();
         if (retryAuth.status) {
           // Retry the request
           const retryResponse = await this.httpClient.post<OrderResponse>(
             API_ENDPOINTS.CANCEL_ORDER,
             requestParams
           );
+          this.restoreMainAuth();
           if (retryResponse.code === 200) {
             return {
               status: true,
@@ -510,12 +636,14 @@ export class DipCoinPerpSDK {
             };
           }
         }
+        this.restoreMainAuth();
         return {
           status: false,
           error: "Authentication expired and refresh failed",
         };
       }
 
+      this.restoreMainAuth();
       if (response.code === 200) {
         return {
           status: true,
@@ -529,6 +657,7 @@ export class DipCoinPerpSDK {
         };
       }
     } catch (error) {
+      this.restoreMainAuth();
       return {
         status: false,
         error: formatError(error),
@@ -542,8 +671,9 @@ export class DipCoinPerpSDK {
    */
   async adjustLeverage(params: AdjustLeverageParams): Promise<SDKResponse<OrderResponse>> {
     try {
-      const authResult = await this.authenticate();
+      const authResult = await this.authenticateForTrading();
       if (!authResult.status) {
+        this.restoreMainAuth();
         return {
           status: false,
           error: authResult.error || "Authentication failed",
@@ -573,13 +703,14 @@ export class DipCoinPerpSDK {
 
       if (response.code === 1000) {
         this.clearAuth();
-        const retryAuth = await this.authenticate();
+        const retryAuth = await this.authenticateForTrading();
         if (retryAuth.status) {
           response = await this.httpClient.post<OrderResponse>(
             API_ENDPOINTS.ADJUST_LEVERAGE,
             payload
           );
         } else {
+          this.restoreMainAuth();
           return {
             status: false,
             error: "Authentication expired and refresh failed",
@@ -587,6 +718,7 @@ export class DipCoinPerpSDK {
         }
       }
 
+      this.restoreMainAuth();
       if (response.code === 200) {
         return {
           status: true,
@@ -600,6 +732,7 @@ export class DipCoinPerpSDK {
         error: response.message || "Failed to adjust leverage",
       };
     } catch (error) {
+      this.restoreMainAuth();
       return {
         status: false,
         error: formatError(error),
@@ -695,13 +828,17 @@ export class DipCoinPerpSDK {
     params: PlaceTpSlOrdersParams
   ): Promise<SDKResponse<PlaceTpSlOrdersResult>> {
     try {
-      const authResult = await this.authenticate();
+      const authResult = await this.authenticateForTrading();
       if (!authResult.status) {
+        this.restoreMainAuth();
         return {
           status: false,
           error: authResult.error || "Authentication failed",
         };
       }
+
+      // Use sub-account keypair for signing if available
+      const signingKeypair = this.subKeypair || this.keypair;
 
       const {
         symbol,
@@ -755,7 +892,7 @@ export class DipCoinPerpSDK {
 
         if (response.code === 1000) {
           this.clearAuth();
-          const retryAuth = await this.authenticate();
+          const retryAuth = await this.authenticateForTrading();
           if (retryAuth.status) {
             response = await this.httpClient.post<OrderResponse>(
               API_ENDPOINTS.PLAN_CLOSE_ORDER,
@@ -789,7 +926,7 @@ export class DipCoinPerpSDK {
         const tpOrder = {
           market,
           creator: this.walletAddress,
-          isLong,
+          isLong: !isLong,
           reduceOnly,
           postOnly,
           orderbookOnly,
@@ -801,9 +938,9 @@ export class DipCoinPerpSDK {
           salt: tpSaltValue,
         };
 
-        const tpOrderMsg = OrderSigner.getOrderMessageForUIWallet(tpOrder);
+        const tpOrderMsg = getOrderMessageForUIWallet(tpOrder);
         const tpOrderSignature = await signMessage(
-          this.keypair,
+          signingKeypair,
           new TextEncoder().encode(tpOrderMsg)
         );
 
@@ -845,7 +982,7 @@ export class DipCoinPerpSDK {
         const slOrder = {
           market,
           creator: this.walletAddress,
-          isLong,
+          isLong: !isLong,
           reduceOnly,
           postOnly,
           orderbookOnly,
@@ -857,9 +994,9 @@ export class DipCoinPerpSDK {
           salt: slSaltValue,
         };
 
-        const slOrderMsg = OrderSigner.getOrderMessageForUIWallet(slOrder);
+        const slOrderMsg = getOrderMessageForUIWallet(slOrder);
         const slOrderSignature = await signMessage(
-          this.keypair,
+          signingKeypair,
           new TextEncoder().encode(slOrderMsg)
         );
 
@@ -902,12 +1039,14 @@ export class DipCoinPerpSDK {
       );
 
       if (success) {
+        this.restoreMainAuth();
         return {
           status: true,
           data: results,
         };
       }
 
+      this.restoreMainAuth();
       return {
         status: false,
         data: results,
@@ -917,6 +1056,7 @@ export class DipCoinPerpSDK {
           "Failed to place TP/SL order",
       };
     } catch (error) {
+      this.restoreMainAuth();
       return {
         status: false,
         error: formatError(error),
@@ -1004,7 +1144,7 @@ export class DipCoinPerpSDK {
    * Get account information
    * @returns Account info response
    */
-  async getAccountInfo(): Promise<SDKResponse<AccountInfo>> {
+  async getAccountInfo(params?: AccountInfoParams): Promise<SDKResponse<AccountInfo>> {
     try {
       // Ensure authenticated before making request
       const authResult = await this.authenticate();
@@ -1015,8 +1155,14 @@ export class DipCoinPerpSDK {
         };
       }
 
+      const queryParams: Record<string, any> = {};
+      if (params?.parentAddress) {
+        queryParams.parentAddress = params.parentAddress;
+      }
+
       const response = await this.httpClient.get<AccountInfoResponse>(
-        API_ENDPOINTS.GET_ACCOUNT_INFO
+        API_ENDPOINTS.GET_ACCOUNT_INFO,
+        { params: queryParams }
       );
 
       // Handle JWT expiration (code 1000)
@@ -1027,7 +1173,8 @@ export class DipCoinPerpSDK {
         if (retryAuth.status) {
           // Retry the request
           const retryResponse = await this.httpClient.get<AccountInfoResponse>(
-            API_ENDPOINTS.GET_ACCOUNT_INFO
+            API_ENDPOINTS.GET_ACCOUNT_INFO,
+            { params: queryParams }
           );
           if (retryResponse.code === 200 && retryResponse.data) {
             return {
@@ -1078,7 +1225,7 @@ export class DipCoinPerpSDK {
    * @param symbol Optional symbol filter
    * @returns Positions response
    */
-  async getPositions(symbol?: string): Promise<SDKResponse<Position[]>> {
+  async getPositions(paramsOrSymbol?: string | PositionsParams): Promise<SDKResponse<Position[]>> {
     try {
       // Ensure authenticated before making request
       const authResult = await this.authenticate();
@@ -1090,8 +1237,11 @@ export class DipCoinPerpSDK {
       }
 
       const params: Record<string, any> = {};
-      if (symbol) {
-        params.symbol = symbol;
+      if (typeof paramsOrSymbol === "string") {
+        params.symbol = paramsOrSymbol;
+      } else if (paramsOrSymbol) {
+        if (paramsOrSymbol.symbol) params.symbol = paramsOrSymbol.symbol;
+        if (paramsOrSymbol.parentAddress) params.parentAddress = paramsOrSymbol.parentAddress;
       }
 
       const response = await this.httpClient.get<PositionsResponse>(API_ENDPOINTS.GET_POSITIONS, {
@@ -1150,42 +1300,9 @@ export class DipCoinPerpSDK {
    */
   async getTradingPairs(): Promise<SDKResponse<TradingPair[]>> {
     try {
-      // Ensure authenticated before making request
-      const authResult = await this.authenticate();
-      if (!authResult.status) {
-        return {
-          status: false,
-          error: authResult.error || "Authentication failed",
-        };
-      }
-
       const response = await this.httpClient.get<TradingPairsResponse>(
         API_ENDPOINTS.GET_TRADING_PAIRS
       );
-
-      // Handle JWT expiration
-      if (response.code === 1000) {
-        this.clearAuth();
-        const retryAuth = await this.authenticate();
-        if (retryAuth.status) {
-          const retryResponse = await this.httpClient.get<TradingPairsResponse>(
-            API_ENDPOINTS.GET_TRADING_PAIRS
-          );
-          if (retryResponse.code === 200) {
-            const pairs = Array.isArray(retryResponse.data)
-              ? retryResponse.data
-              : retryResponse.data?.data || [];
-            return {
-              status: true,
-              data: pairs,
-            };
-          }
-        }
-        return {
-          status: false,
-          error: "Authentication expired and refresh failed",
-        };
-      }
 
       if (response.code === 200) {
         const pairs = Array.isArray(response.data) ? response.data : response.data?.data || [];
@@ -1231,7 +1348,7 @@ export class DipCoinPerpSDK {
    * @param symbol Optional symbol filter
    * @returns Open orders response
    */
-  async getOpenOrders(symbol?: string): Promise<SDKResponse<OpenOrder[]>> {
+  async getOpenOrders(paramsOrSymbol?: string | OpenOrdersParams): Promise<SDKResponse<OpenOrder[]>> {
     try {
       // Ensure authenticated before making request
       const authResult = await this.authenticate();
@@ -1243,8 +1360,13 @@ export class DipCoinPerpSDK {
       }
 
       const params: Record<string, any> = {};
-      if (symbol) {
-        params.symbol = symbol;
+      if (typeof paramsOrSymbol === "string") {
+        params.symbol = paramsOrSymbol;
+      } else if (paramsOrSymbol) {
+        if (paramsOrSymbol.symbol) params.symbol = paramsOrSymbol.symbol;
+        if (paramsOrSymbol.page) params.page = paramsOrSymbol.page;
+        if (paramsOrSymbol.pageSize) params.pageSize = paramsOrSymbol.pageSize;
+        if (paramsOrSymbol.parentAddress) params.parentAddress = paramsOrSymbol.parentAddress;
       }
 
       const response = await this.httpClient.get<OpenOrdersResponse>(
@@ -1318,13 +1440,6 @@ export class DipCoinPerpSDK {
           error: "Symbol is required",
         };
       }
-
-      // Market API endpoints typically don't require authentication
-      // But we'll try to authenticate if possible for consistency
-      // If authentication fails, we'll still try to fetch the order book
-      await this.authenticate().catch(() => {
-        // Ignore authentication errors for market data
-      });
 
       const params: Record<string, any> = {
         symbol,
@@ -1497,13 +1612,6 @@ export class DipCoinPerpSDK {
           error: "Symbol is required",
         };
       }
-
-      // Market API endpoints typically don't require authentication
-      // But we'll try to authenticate if possible for consistency
-      // If authentication fails, we'll still try to fetch the ticker
-      await this.authenticate().catch(() => {
-        // Ignore authentication errors for market data
-      });
 
       const params: Record<string, any> = {
         symbol,
@@ -1708,16 +1816,177 @@ export class DipCoinPerpSDK {
   }
 
   /**
+   * Get history orders (matches Java historyOrders)
+   * @param params History orders query parameters
+   */
+  async getHistoryOrders(params?: HistoryOrdersParams): Promise<SDKResponse<PageResponse<HistoryOrder>>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      const queryParams: Record<string, any> = {};
+      if (params?.symbol) queryParams.symbol = params.symbol;
+      if (params?.page) queryParams.page = params.page;
+      if (params?.pageSize) queryParams.pageSize = params.pageSize;
+      if (params?.parentAddress) queryParams.parentAddress = params.parentAddress;
+      if (params?.beginTime) queryParams.beginTime = params.beginTime;
+      if (params?.endTime) queryParams.endTime = params.endTime;
+
+      let response = await this.httpClient.get<PageResponse<HistoryOrder>>(
+        API_ENDPOINTS.HISTORY_ORDERS,
+        { params: queryParams }
+      );
+
+      if (response.code === 1000) {
+        this.clearAuth();
+        const retryAuth = await this.authenticate();
+        if (retryAuth.status) {
+          response = await this.httpClient.get<PageResponse<HistoryOrder>>(
+            API_ENDPOINTS.HISTORY_ORDERS,
+            { params: queryParams }
+          );
+        } else {
+          return { status: false, error: "Authentication expired and refresh failed" };
+        }
+      }
+
+      if (response.code === 200 && response.data) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to get history orders" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get funding settlements history (matches Java fundingSettlements)
+   * @param params Funding settlements query parameters
+   */
+  async getFundingSettlements(params?: FundingSettlementsParams): Promise<SDKResponse<PageResponse<FundingSettlement>>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      const queryParams: Record<string, any> = {};
+      if (params?.symbol) queryParams.symbol = params.symbol;
+      if (params?.page) queryParams.page = params.page;
+      if (params?.pageSize) queryParams.pageSize = params.pageSize;
+      if (params?.parentAddress) queryParams.parentAddress = params.parentAddress;
+      if (params?.beginTime) queryParams.beginTime = params.beginTime;
+
+      let response = await this.httpClient.get<PageResponse<FundingSettlement>>(
+        API_ENDPOINTS.FUNDING_SETTLEMENTS,
+        { params: queryParams }
+      );
+
+      if (response.code === 1000) {
+        this.clearAuth();
+        const retryAuth = await this.authenticate();
+        if (retryAuth.status) {
+          response = await this.httpClient.get<PageResponse<FundingSettlement>>(
+            API_ENDPOINTS.FUNDING_SETTLEMENTS,
+            { params: queryParams }
+          );
+        } else {
+          return { status: false, error: "Authentication expired and refresh failed" };
+        }
+      }
+
+      if (response.code === 200 && response.data) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to get funding settlements" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get balance changes history (matches Java balanceChanges)
+   * @param params Balance changes query parameters
+   */
+  async getBalanceChanges(params?: BalanceChangesParams): Promise<SDKResponse<PageResponse<BalanceChange>>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      const queryParams: Record<string, any> = {};
+      if (params?.page) queryParams.page = params.page;
+      if (params?.pageSize) queryParams.pageSize = params.pageSize;
+      if (params?.parentAddress) queryParams.parentAddress = params.parentAddress;
+      if (params?.beginTime) queryParams.beginTime = params.beginTime;
+
+      let response = await this.httpClient.get<PageResponse<BalanceChange>>(
+        API_ENDPOINTS.BALANCE_CHANGES,
+        { params: queryParams }
+      );
+
+      if (response.code === 1000) {
+        this.clearAuth();
+        const retryAuth = await this.authenticate();
+        if (retryAuth.status) {
+          response = await this.httpClient.get<PageResponse<BalanceChange>>(
+            API_ENDPOINTS.BALANCE_CHANGES,
+            { params: queryParams }
+          );
+        } else {
+          return { status: false, error: "Authentication expired and refresh failed" };
+        }
+      }
+
+      if (response.code === 200 && response.data) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to get balance changes" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get oracle price for a trading pair (matches Java oracle)
+   * @param symbol Trading symbol (e.g., "BTC-PERP")
+   * @returns Oracle price as string (in wei/base unit)
+   */
+  async getOraclePrice(symbol: string): Promise<SDKResponse<string>> {
+    try {
+      if (!symbol) {
+        return { status: false, error: "Symbol is required" };
+      }
+
+      const response = await this.httpClient.get<any>(
+        API_ENDPOINTS.ORACLE,
+        { params: { symbol } }
+      );
+
+      if (response.code === 200 && response.data !== undefined) {
+        return { status: true, data: String(response.data) };
+      }
+      return { status: false, error: response.message || "Failed to get oracle price" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
    * Add isolated margin to an existing position (on-chain)
    * @param params Margin adjustment parameters
    */
   async addMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
     const transaction = await this.buildMarginTransaction(params, "add");
     if (transaction) {
-      return this.exchangeOnChain.executeTxBlock(transaction, this.keypair);
+      return executeTxBlock(this.suiClient, transaction, this.keypair);
     }
     const fallbackPayload = this.buildMarginCallArgs(params, "add");
-    return this.exchangeOnChain.addMargin(fallbackPayload);
+    const tx = buildAddMarginTx(this.deploymentConfig, fallbackPayload, undefined, fallbackPayload.gasBudget, this.keypair.getPublicKey().toSuiAddress());
+    return executeTxBlock(this.suiClient, tx, this.keypair);
   }
 
   /**
@@ -1727,10 +1996,11 @@ export class DipCoinPerpSDK {
   async removeMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
     const transaction = await this.buildMarginTransaction(params, "remove");
     if (transaction) {
-      return this.exchangeOnChain.executeTxBlock(transaction, this.keypair);
+      return executeTxBlock(this.suiClient, transaction, this.keypair);
     }
     const fallbackPayload = this.buildMarginCallArgs(params, "remove");
-    return this.exchangeOnChain.removeMargin(fallbackPayload);
+    const tx = buildRemoveMarginTx(this.deploymentConfig, fallbackPayload, undefined, fallbackPayload.gasBudget, this.keypair.getPublicKey().toSuiAddress());
+    return executeTxBlock(this.suiClient, tx, this.keypair);
   }
 
   /**
@@ -1740,7 +2010,7 @@ export class DipCoinPerpSDK {
     params: MarginAdjustmentParams,
     action: "add" | "remove"
   ): {
-    amount: number;
+    amount: string;
     account: string;
     perpID?: string;
     market?: string;
@@ -1763,10 +2033,9 @@ export class DipCoinPerpSDK {
       throw new Error(`Amount must be greater than zero to ${action} margin`);
     }
 
-    const amountNumber = new BigNumber(amount).toNumber();
-    if (!Number.isFinite(amountNumber)) {
-      throw new Error("Amount is too large to represent as a number");
-    }
+    // Convert human-readable USDC amount to 18-decimal wei format for on-chain
+    // The contract divides by 1e9 (base_uint) to get 9-decimal internal representation
+    const amountWei = formatNormalToWei(amount);
 
     const marketSymbolInput = market || symbol;
     const marketSymbol = marketSymbolInput ? marketSymbolInput.toUpperCase() : undefined;
@@ -1778,7 +2047,7 @@ export class DipCoinPerpSDK {
     }
 
     return {
-      amount: amountNumber,
+      amount: amountWei,
       account: accountAddress || this.walletAddress,
       market: marketSymbol,
       perpID: resolvedPerpId,
@@ -1786,14 +2055,6 @@ export class DipCoinPerpSDK {
       gasBudget,
       txHash,
     };
-  }
-
-  private getDeploymentPackageId(): string {
-    const packages = this.deploymentConfig?.packages;
-    if (!packages || !packages.length) {
-      throw new Error("Deployment config missing packages array");
-    }
-    return packages[packages.length - 1];
   }
 
   private getDeploymentProtocolConfigId(): string {
@@ -1808,18 +2069,15 @@ export class DipCoinPerpSDK {
     params: MarginAdjustmentParams,
     action: "add" | "remove"
   ): Promise<Transaction | undefined> {
-    if (!this.transactionBuilder) {
-      return undefined;
-    }
     const payload = this.buildMarginCallArgs(params, action);
     const updatePriceTx = payload.market
       ? await this.buildUpdatePriceTransaction(payload.market)
       : undefined;
     const baseTx = updatePriceTx || new Transaction();
     if (action === "add") {
-      return this.transactionBuilder.exchange_addMarginTx(payload, baseTx, params.gasBudget);
+      return buildAddMarginTx(this.deploymentConfig, payload, baseTx, params.gasBudget);
     }
-    return this.transactionBuilder.exchange_removeMarginTx(payload, baseTx, params.gasBudget);
+    return buildRemoveMarginTx(this.deploymentConfig, payload, baseTx, params.gasBudget);
   }
 
   private async buildUpdatePriceTransaction(symbol: string): Promise<Transaction | undefined> {
@@ -1872,11 +2130,11 @@ export class DipCoinPerpSDK {
     symbol: string
   ): Promise<Transaction | undefined> {
     try {
-      const oraclePrice = await this.exchangeOnChain.getOraclePrice(symbol);
+      const oraclePrice = await getOnChainOraclePrice(this.suiClient, this.deploymentConfig, symbol);
       if (oraclePrice === undefined || oraclePrice === null) {
         return undefined;
       }
-      return this.transactionBuilder.price_info_setOraclePriceTx({
+      return buildSetOraclePriceTx(this.deploymentConfig, {
         price: Number(oraclePrice),
         market: symbol,
       });
@@ -1992,12 +2250,29 @@ export class DipCoinPerpSDK {
    */
   private resolvePerpIdFromDeployment(market: string): string | undefined {
     try {
-      const perpId = this.exchangeOnChain.getPerpetualID(market);
+      const perpId = getDeploymentPerpetualID(this.deploymentConfig, market);
       return perpId || undefined;
     } catch (error) {
       console.warn(`Failed to resolve PerpetualID for market ${market}:`, error);
       return undefined;
     }
+  }
+
+  /**
+   * Set sub-account on-chain (authorize a sub-account address)
+   * @param subAddress Sub-account address to authorize
+   * @returns On-chain transaction result
+   */
+  async setSubAccount(subAddress: string) {
+    return await onChainSetSubAccount(
+      this.suiClient,
+      this.deploymentConfig,
+      {
+        account: subAddress,
+        status: true,
+      },
+      this.keypair
+    );
   }
 
   /**
@@ -2011,7 +2286,9 @@ export class DipCoinPerpSDK {
    * ```
    */
   async depositToBank(amount: number) {
-    return await this.exchangeOnChain.depositToBank(
+    return await onChainDepositToBank(
+      this.suiClient,
+      this.deploymentConfig,
       {
         amount: formatNormalToWei(amount, DECIMALS.USDC),
         accountAddress: this.address,
@@ -2031,7 +2308,9 @@ export class DipCoinPerpSDK {
    * ```
    */
   async withdrawFromBank(amount: number) {
-    return await this.exchangeOnChain.withdrawFromBank(
+    return await onChainWithdrawFromBank(
+      this.suiClient,
+      this.deploymentConfig,
       {
         amount: formatNormalToWei(amount, DECIMALS.USDC),
         accountAddress: this.address,
@@ -2039,4 +2318,765 @@ export class DipCoinPerpSDK {
       this.keypair
     );
   }
+
+  /**
+   * Get all coin balances on-chain for the current wallet address
+   * @returns Array of coin balances with coinType and totalBalance
+   */
+  async getAllBalances(owner?: string): Promise<SDKResponse<{ coinType: string; totalBalance: string }[]>> {
+    try {
+      const balances = await this.suiClient.getAllBalances({ owner: owner || this.walletAddress });
+      return { status: true, data: balances };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get coin metadata (symbol, decimals, name) for a given coin type
+   * @param coinType Full coin type string (e.g., "0x2::sui::SUI")
+   */
+  async getCoinMetadata(coinType: string): Promise<SDKResponse<{ decimals: number; symbol: string; name: string }>> {
+    try {
+      const metadata = await this.suiClient.getCoinMetadata({ coinType });
+      if (!metadata) {
+        return { status: false, error: "Coin metadata not found" };
+      }
+      return { status: true, data: { decimals: metadata.decimals, symbol: metadata.symbol, name: metadata.name } };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  // =====================================================
+  // Vault (on-chain contract) Operations
+  // =====================================================
+  //
+  // Vault functions live in a SEPARATE package from the exchange.
+  // The library's ExchangeOnChain uses getPackageID() (exchange pkg)
+  // for vault moveCall targets, causing TypeMismatch errors.
+  // We build vault transactions manually with the correct vault package.
+  // =====================================================
+
+  private getVaultPackageId(): string {
+    const pkg = this.deploymentConfig?.vaultPackage;
+    if (!pkg) throw new Error("Deployment config missing vaultPackage");
+    return pkg;
+  }
+
+  private getVaultConfigId(): string {
+    const id = this.deploymentConfig?.objects?.VaultConfig?.id;
+    if (!id) throw new Error("Deployment config missing VaultConfig id");
+    return id;
+  }
+
+  private getBankId(): string {
+    const id = this.deploymentConfig?.objects?.Bank?.id;
+    if (!id) throw new Error("Deployment config missing Bank id");
+    return id;
+  }
+
+  private getTxIndexerId(): string {
+    const id = this.deploymentConfig?.objects?.TxIndexer?.id;
+    if (!id) throw new Error("Deployment config missing TxIndexer id");
+    return id;
+  }
+
+  private getSubAccountsId(): string {
+    const id = this.deploymentConfig?.objects?.SubAccounts?.id;
+    if (!id) throw new Error("Deployment config missing SubAccounts id");
+    return id;
+  }
+
+  private getCurrencyType(): string {
+    const dt = this.deploymentConfig?.objects?.Currency?.dataType;
+    if (!dt) throw new Error("Deployment config missing Currency dataType");
+    return dt;
+  }
+
+  private getMarketSymbols(): string[] {
+    return Object.keys(this.deploymentConfig?.markets || {});
+  }
+
+  private getVaultPerpetualId(symbol: string): string {
+    const id = this.deploymentConfig?.markets?.[symbol]?.Objects?.Perpetual?.id;
+    if (!id) throw new Error(`Deployment config missing Perpetual id for ${symbol}`);
+    return id;
+  }
+
+  private getVaultPriceInfoObjectId(symbol: string): string {
+    const id = this.deploymentConfig?.markets?.[symbol]?.Objects?.PriceInfoObject?.id;
+    if (!id) throw new Error(`Deployment config missing PriceInfoObject id for ${symbol}`);
+    return id;
+  }
+
+  private async buildVaultNavTransaction(
+    vaultID: string,
+    markets?: string[],
+    tx?: Transaction
+  ): Promise<{ nav: any; tx: Transaction }> {
+    const t = tx || new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    const currencyType = this.getCurrencyType();
+
+    const symbols = markets && markets.length > 0 ? markets : this.getMarketSymbols();
+
+    if (this.options.network === "mainnet") {
+      // On mainnet, use Pyth to fetch fresh price VAAs and update on-chain oracles
+      this.ensurePythClients();
+      if (this.priceServiceConnection && this.pythClient) {
+        const priceIds: string[] = [];
+        for (const sym of symbols) {
+          const feedId = await this.resolvePriceFeedId(sym);
+          if (feedId) priceIds.push(feedId);
+        }
+        if (priceIds.length > 0) {
+          const priceUpdateData = await this.priceServiceConnection.getPriceFeedsUpdateData(priceIds);
+          await this.pythClient.updatePriceFeeds(t, priceUpdateData, priceIds);
+        }
+      }
+    } else {
+      // On testnet, prepend price oracle updates so PriceInfoObjects are fresh
+      const prices: { price: number; confidence?: string; market?: string }[] = [];
+      for (const sym of symbols) {
+        try {
+          const oraclePrice = await getOnChainOraclePrice(this.suiClient, this.deploymentConfig, sym);
+          if (oraclePrice !== undefined && oraclePrice !== null) {
+            prices.push({ price: Number(oraclePrice), market: sym });
+          }
+        } catch {
+          // skip symbols where oracle price is unavailable
+        }
+      }
+      if (prices.length > 0) {
+        buildBatchSetOraclePriceTx(this.deploymentConfig, { prices }, t);
+      }
+    }
+
+    const [nav] = t.moveCall({
+      target: `${vaultPkg}::vault::new_vault_nav`,
+      arguments: [
+        t.object(this.getDeploymentProtocolConfigId()),
+        t.object(this.getVaultConfigId()),
+        t.object(vaultID),
+        t.object(this.getBankId()),
+      ],
+      typeArguments: [currencyType],
+    });
+
+    for (const sym of symbols) {
+      const perpId = this.getVaultPerpetualId(sym);
+      const priceInfoId = this.getVaultPriceInfoObjectId(sym);
+      t.moveCall({
+        target: `${vaultPkg}::vault::compute_perpetual_position_value`,
+        arguments: [nav, t.object("0x6"), t.object(perpId), t.object(priceInfoId)],
+        typeArguments: [],
+      });
+    }
+
+    return { nav, tx: t };
+  }
+
+  private async signAndExecuteVaultTx(tx: Transaction): Promise<SuiTransactionBlockResponse> {
+    tx.setSender(this.keypair.getPublicKey().toSuiAddress());
+    return await this.suiClient.signAndExecuteTransaction({
+      signer: this.keypair,
+      transaction: tx,
+      options: { showEffects: true, showObjectChanges: true },
+    });
+  }
+
+  /**
+   * Create a new on-chain vault
+   */
+  async createVault(args: {
+    name: string;
+    trader: string;
+    maxCap: number;
+    minDepositAmount: number;
+    creatorMinimumShareRatio: string;
+    creatorProfitShareRatio: string;
+    initialAmount: number;
+  }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::create_vault`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object("0x6"),
+        tx.object(this.getVaultConfigId()),
+        tx.object(this.getSubAccountsId()),
+        tx.object(this.getBankId()),
+        tx.object(this.getTxIndexerId()),
+        tx.pure.string(args.name),
+        tx.pure.address(args.trader),
+        tx.pure.u128(formatNormalToWei(args.maxCap)),
+        tx.pure.u128(formatNormalToWei(args.minDepositAmount)),
+        tx.pure.u128(args.creatorMinimumShareRatio),
+        tx.pure.u128(args.creatorProfitShareRatio),
+        tx.pure.u128(formatNormalToWei(args.initialAmount)),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Deposit USDC into a vault
+   */
+  async depositToVault(args: { vaultID: string; amount: number; markets?: string[] }) {
+    const { nav, tx } = await this.buildVaultNavTransaction(args.vaultID, args.markets);
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::deposit`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object("0x6"),
+        tx.object(this.getBankId()),
+        tx.object(this.getTxIndexerId()),
+        tx.object(args.vaultID),
+        nav,
+        tx.pure.u128(formatNormalToWei(args.amount)),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Request withdrawal from a vault (by share amount)
+   */
+  async requestWithdrawFromVault(args: { vaultID: string; shares: number }) {
+    const tx = new Transaction();
+
+    // On mainnet, update Pyth oracle prices before withdraw (contract checks freshness)
+    if (this.options.network === "mainnet") {
+      this.ensurePythClients();
+      if (this.priceServiceConnection && this.pythClient) {
+        const symbols = this.getMarketSymbols();
+        const priceIds: string[] = [];
+        for (const sym of symbols) {
+          const feedId = await this.resolvePriceFeedId(sym);
+          if (feedId) priceIds.push(feedId);
+        }
+        if (priceIds.length > 0) {
+          const priceUpdateData = await this.priceServiceConnection.getPriceFeedsUpdateData(priceIds);
+          await this.pythClient.updatePriceFeeds(tx, priceUpdateData, priceIds);
+        }
+      }
+    }
+
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::request_withdraw`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object("0x6"),
+        tx.object(args.vaultID),
+        tx.pure.u128(formatNormalToWei(args.shares)),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Fill pending withdrawal requests (creator/operator only)
+   */
+  async fillWithdrawalRequests(args: {
+    vaultID: string;
+    withdrawalRequestIDs: string[];
+    markets?: string[];
+  }) {
+    const { nav, tx } = await this.buildVaultNavTransaction(args.vaultID, args.markets);
+    const vaultPkg = this.getVaultPackageId();
+    const requestVec = tx.makeMoveVec({
+      elements: args.withdrawalRequestIDs.map((id) => tx.object(id)),
+    });
+    tx.moveCall({
+      target: `${vaultPkg}::vault::fill_withdrawal_requests`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object("0x6"),
+        tx.object(this.getBankId()),
+        tx.object(this.getTxIndexerId()),
+        tx.object(args.vaultID),
+        nav,
+        requestVec,
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Close a vault (creator only)
+   */
+  async closeVault(args: { vaultID: string; markets?: string[] }) {
+    const { nav, tx } = await this.buildVaultNavTransaction(args.vaultID, args.markets);
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::close_vault_v2`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(this.getSubAccountsId()),
+        tx.object(args.vaultID),
+        tx.object(this.getBankId()),
+        tx.object("0x6"),
+        nav,
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Remove a closed vault (after all funds claimed)
+   */
+  async removeVault(args: { vaultID: string }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::remove_vault`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(this.getBankId()),
+        tx.object(args.vaultID),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Claim funds from a closed vault
+   */
+  async claimClosedVaultFunds(args: { vaultID: string }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::claim_closed_vault_funds`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(this.getBankId()),
+        tx.object(this.getTxIndexerId()),
+        tx.object(args.vaultID),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Set the trader address for a vault (creator only)
+   */
+  async setVaultTrader(args: { vaultID: string; newTrader: string }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::set_trader`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(args.vaultID),
+        tx.object(this.getSubAccountsId()),
+        tx.pure.address(args.newTrader),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Add or remove a sub-trader for a vault
+   */
+  async setVaultSubTrader(args: { vaultID: string; subTrader: string; status: boolean }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::set_sub_trader`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(args.vaultID),
+        tx.object(this.getSubAccountsId()),
+        tx.pure.address(args.subTrader),
+        tx.pure.bool(args.status),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Enable or disable deposits to a vault (creator only)
+   */
+  async setVaultDepositStatus(args: { vaultID: string; status: boolean }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::set_deposit_status`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(args.vaultID),
+        tx.pure.bool(args.status),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Set maximum USDC cap for a vault (creator only)
+   */
+  async setVaultMaxCap(args: { vaultID: string; maxCap: number }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::set_max_cap`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(args.vaultID),
+        tx.pure.u128(formatNormalToWei(args.maxCap)),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Set minimum deposit amount for a vault (creator only)
+   */
+  async setVaultMinDepositAmount(args: { vaultID: string; minDepositAmount: number }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::set_min_deposit_amount`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(args.vaultID),
+        tx.pure.u128(formatNormalToWei(args.minDepositAmount)),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Enable or disable auto-close on withdrawal (creator only)
+   */
+  async setVaultAutoCloseOnWithdraw(args: { vaultID: string; autoCloseOnWithdraw: boolean }) {
+    const tx = new Transaction();
+    const vaultPkg = this.getVaultPackageId();
+    tx.moveCall({
+      target: `${vaultPkg}::vault::set_auto_close_on_withdraw`,
+      arguments: [
+        tx.object(this.getDeploymentProtocolConfigId()),
+        tx.object(this.getVaultConfigId()),
+        tx.object(args.vaultID),
+        tx.pure.bool(args.autoCloseOnWithdraw),
+      ],
+      typeArguments: [this.getCurrencyType()],
+    });
+    return this.signAndExecuteVaultTx(tx);
+  }
+
+  /**
+   * Read vault object data from chain
+   */
+  /**
+   * Get the vault lock period from VaultConfig (on-chain).
+   */
+  async getVaultLockPeriodMs(): Promise<number> {
+    const configId = this.getVaultConfigId();
+    const obj = await this.suiClient.getObject({
+      id: configId,
+      options: { showContent: true },
+    });
+    const fields = (obj.data?.content as any)?.fields;
+    return Number(fields?.lock_period_ms || 86400000);
+  }
+
+  async getVaultInfo(vaultID: string): Promise<SDKResponse<any>> {
+    try {
+      const obj = await this.suiClient.getObject({
+        id: vaultID,
+        options: { showContent: true, showType: true },
+      });
+      if (!obj.data?.content || obj.data.content.dataType !== "moveObject") {
+        return { status: false, error: "Vault object not found or not a Move object" };
+      }
+      return { status: true, data: (obj.data.content as any).fields };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get a user's position (shares) in a vault by querying the on-chain user_positions table.
+   */
+  async getVaultUserPosition(
+    vaultID: string,
+    userAddress?: string,
+  ): Promise<SDKResponse<any>> {
+    try {
+      const address = userAddress || this.walletAddress;
+      // First get vault object to find user_positions table ID
+      const vaultResult = await this.getVaultInfo(vaultID);
+      if (!vaultResult.status || !vaultResult.data) {
+        return { status: false, error: vaultResult.error || "Failed to get vault info" };
+      }
+      const tableId = vaultResult.data.user_positions?.fields?.id?.id;
+      if (!tableId) {
+        return { status: false, error: "Vault has no user_positions table" };
+      }
+      // Query dynamic field for user's position
+      const result = await this.suiClient.getDynamicFieldObject({
+        parentId: tableId,
+        name: { type: "address", value: address },
+      });
+      if (!result.data?.content || result.data.content.dataType !== "moveObject") {
+        return { status: false, error: "No position found for this address in the vault" };
+      }
+      const fields = (result.data.content as any).fields?.value?.fields;
+      if (!fields) {
+        return { status: false, error: "Failed to parse position data" };
+      }
+      return {
+        status: true,
+        data: {
+          shares: fields.shares,
+          averagePrice: fields.average_price,
+          lastDepositTimeMs: fields.last_deposit_time_ms,
+          vaultTotalShares: vaultResult.data.total_shares,
+          lastSharePrice: vaultResult.data.last_share_price,
+        },
+      };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * List vaults created by a specific address via server API.
+   */
+  async listVaults(
+    creatorAddress?: string,
+  ): Promise<SDKResponse<any[]>> {
+    try {
+      const address = creatorAddress || this.walletAddress;
+      const response = await this.httpClient.get<any[]>(API_ENDPOINTS.VAULTS_BY_CREATOR, {
+        params: { address },
+      });
+      if (response.code === 200) {
+        return { status: true, data: response.data || [] };
+      }
+      return { status: false, error: response.message || "Failed to list vaults" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * List all public vaults.
+   */
+  // ─── Points & Referral ────────────────────────────────────────────
+
+  /**
+   * Force re-onboard by clearing cached JWT and calling /api/authorize again.
+   * The points service requires the user to be registered via authorize.
+   */
+  private async forceOnboard(): Promise<boolean> {
+    this.clearAuth();
+    const auth = await this.authenticate();
+    if (!auth.status) return false;
+    // Calling getAccountInfo triggers user registration in the points system
+    await this.httpClient.get(API_ENDPOINTS.GET_ACCOUNT_INFO);
+    return true;
+  }
+
+  /**
+   * Check if an API response indicates the user is not registered in the points system.
+   */
+  private isUserNotFoundResponse(response: { code?: number; message?: string }): boolean {
+    return (
+      response.code !== 200 &&
+      typeof response.message === "string" &&
+      response.message.toLowerCase().includes("user address not found")
+    );
+  }
+
+  /**
+   * Join a team via referral code
+   * @param referralCode The referral code to bind
+   */
+  async joinTeam(referralCode: string): Promise<SDKResponse<any>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      let response = await this.httpClient.postForm<any>(API_ENDPOINTS.POINT_JOIN_TEAM, {
+        referralCode,
+      });
+
+      if (response.code === 1000 || this.isUserNotFoundResponse(response)) {
+        if (await this.forceOnboard()) {
+          response = await this.httpClient.postForm<any>(API_ENDPOINTS.POINT_JOIN_TEAM, {
+            referralCode,
+          });
+        } else {
+          return { status: false, error: "Authentication failed" };
+        }
+      }
+
+      if (response.code === 200) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to join team" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get referral link info for the current wallet
+   */
+  async getReferralLink(): Promise<SDKResponse<any>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      let response = await this.httpClient.get<any>(API_ENDPOINTS.POINT_REFERRAL_LINK);
+
+      if (response.code === 1000 || this.isUserNotFoundResponse(response)) {
+        if (await this.forceOnboard()) {
+          response = await this.httpClient.get<any>(API_ENDPOINTS.POINT_REFERRAL_LINK);
+        } else {
+          return { status: false, error: "Authentication failed" };
+        }
+      }
+
+      if (response.code === 200) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to get referral link" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Change referral code
+   * @param referralCode New referral code
+   */
+  async changeReferralCode(referralCode: string): Promise<SDKResponse<any>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      let response = await this.httpClient.postForm<any>(API_ENDPOINTS.POINT_REFERRAL_CHANGE, {
+        referralCode,
+      });
+
+      if (response.code === 1000 || this.isUserNotFoundResponse(response)) {
+        if (await this.forceOnboard()) {
+          response = await this.httpClient.postForm<any>(API_ENDPOINTS.POINT_REFERRAL_CHANGE, {
+            referralCode,
+          });
+        } else {
+          return { status: false, error: "Authentication failed" };
+        }
+      }
+
+      if (response.code === 200) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to change referral code" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  /**
+   * Get list of invitees
+   * @param params Pagination parameters
+   */
+  async getInvitees(params?: {
+    page?: number;
+    pageSize?: number;
+  }): Promise<SDKResponse<any>> {
+    try {
+      const authResult = await this.authenticate();
+      if (!authResult.status) {
+        return { status: false, error: authResult.error || "Authentication failed" };
+      }
+
+      const queryParams: Record<string, any> = {};
+      if (params?.page) queryParams.pageNum = params.page;
+      if (params?.pageSize) queryParams.pageSize = params.pageSize;
+
+      let response = await this.httpClient.get<any>(API_ENDPOINTS.POINT_REFERRAL_INVITEES, {
+        params: queryParams,
+      });
+
+      if (response.code === 1000 || this.isUserNotFoundResponse(response)) {
+        if (await this.forceOnboard()) {
+          response = await this.httpClient.get<any>(API_ENDPOINTS.POINT_REFERRAL_INVITEES, {
+            params: queryParams,
+          });
+        } else {
+          return { status: false, error: "Authentication failed" };
+        }
+      }
+
+      if (response.code === 200) {
+        return { status: true, data: response.data };
+      }
+      return { status: false, error: response.message || "Failed to get invitees" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+
+  async listPublicVaults(): Promise<SDKResponse<any[]>> {
+    try {
+      const response = await this.httpClient.get<any[]>(API_ENDPOINTS.VAULTS_PUBLIC);
+      if (response.code === 200) {
+        return { status: true, data: response.data || [] };
+      }
+      return { status: false, error: response.message || "Failed to list public vaults" };
+    } catch (error) {
+      return { status: false, error: formatError(error) };
+    }
+  }
+}
+
+/**
+ * Initialize DipCoin Perpetual Trading SDK
+ * @param privateKey Private key string or Keypair instance
+ * @param options SDK configuration options
+ * @returns Initialized SDK instance
+ */
+export function initDipCoinPerpSDK(
+  privateKey: string | Keypair,
+  options: Partial<DipCoinPerpSDKOptions> & { network: "mainnet" | "testnet" }
+): DipCoinPerpSDK {
+  const sdkOptions = initSDKOptions(options);
+  return new DipCoinPerpSDK(privateKey, sdkOptions);
 }

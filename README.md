@@ -731,6 +731,216 @@ tradingFlow();
 
 - `npm run example` – Runs `examples/index.ts`. Enable extra steps with env flags such as `RUN_LIMIT_ORDER=1`, `RUN_MARGIN_ADD=1`, `RUN_TPSL_DEMO=1`, etc.
 
+## Extended API Surface
+
+In addition to the core trading flow above, the SDK exposes a comprehensive set of REST and on-chain helpers that mirror the full functionality of the reference frontend (`ts-frontend`).
+
+### Public Market Data
+
+```typescript
+const config = await sdk.getGlobalConfig();          // global trading config
+const vols = await sdk.getVolumes();                  // 24h / 7d notional volume
+const ticker = await sdk.getTicker("BTC-PERP");
+const book = await sdk.getOrderBook("BTC-PERP");
+const fr = await sdk.getFundingRateDetail("BTC-PERP");
+const frChart = await sdk.getFundingRateChart("BTC-PERP");
+const frHistory = await sdk.getFundingRateHistory({ pageNum: 1, pageSize: 50 });
+const bars = await sdk.getKlineHistory({ symbol: "BTC-PERP", interval: "5m" });
+const announcements = await sdk.getAnnouncements();
+const notices = await sdk.getNotice();
+const signedFeed = await sdk.getLatestSignedPriceFeed(); // SignedPriceFeedData passthrough
+```
+
+### Trading History (paginated)
+
+```typescript
+const orders   = await sdk.getHistoryOrders({ pageNum: 1, pageSize: 20, symbol: "BTC-PERP" });
+const funding  = await sdk.getFundingSettlements({ pageNum: 1, pageSize: 20 });
+const balance  = await sdk.getBalanceChanges({ pageNum: 1, pageSize: 20 });
+```
+
+Each response is shaped as `{ items, total, pageNum, pageSize, totalPages }`.
+
+### Plan / TP-SL Cancellation
+
+```typescript
+await sdk.cancelPlanOrder({ planId: 12345 });            // cancel by id
+await sdk.cancelPlanOrder({ hash: "0xabc...", symbol: "BTC-PERP" });
+```
+
+### One-Click Trading (1CT) Sub-Account Management
+
+End-to-end helper that generates a fresh sub-account keypair, registers it with the backend, and authorizes it on chain in a single call:
+
+```typescript
+const enable = await sdk.enableOneClickTrading();
+// enable.data => { address, jwt, privateKey, txResponse }
+
+// After this call, sdk.placeOrder() / cancelOrder() / cancelPlanOrder()
+// automatically route through the sub-account JWT and signing keypair.
+
+// Disable when done
+await sdk.disableOneClickTrading();
+```
+
+You can also wire up an existing sub-account manually:
+
+```typescript
+sdk.setOneClickTradingCredentials({
+  address: subAddress,
+  jwt: subJwt,
+  privateKey: subPrivateKey, // optional — required only for sub-account-side signing
+});
+
+// Vault-scoped 1CT (delegates to a vault's sub-trader instead of the main wallet):
+await sdk.enableOneClickTrading({ parentAddress: vaultId });
+```
+
+Lower-level building blocks are also exposed:
+
+```typescript
+await sdk.listApiAccounts();
+await sdk.createApiAccount({ address, signature });
+await sdk.removeApiAccount(address);
+await sdk.getExpired1CTAccounts();          // for the main account
+await sdk.getExpired1CTAccounts(vaultId);   // for a vault sub-trader
+await sdk.setSubAccount({ account, status: true });
+```
+
+### Sponsor (gas-free) Service
+
+```typescript
+const valid = await sdk.sponsorValid();
+const sponsorTx = await sdk.sponsorCreate({ /* tx payload */ });
+const submitted = await sdk.sponsorSubmit({ /* signed payload */ });
+```
+
+### Vault REST APIs
+
+```typescript
+await sdk.getVaultOverview();
+await sdk.getVaultConfig();
+await sdk.getVaultList();
+await sdk.getVaultDetail(vaultId);
+await sdk.getVaultPerformance(vaultId);
+await sdk.getVaultValueChart(vaultId);
+await sdk.getVaultPNLChart(vaultId);
+await sdk.getVaultAccount(vaultId);
+await sdk.getVaultPositions(vaultId);
+await sdk.getVaultPendingOrders(vaultId);
+await sdk.getVaultFilledOrders(vaultId);
+await sdk.getVaultFundingHistory(vaultId);
+await sdk.getVaultDepositsAndWithdraws(vaultId);
+await sdk.getVaultDepositors(vaultId);
+await sdk.checkVaultWhitelist();
+
+// Authenticated:
+await sdk.getVaultMyHoldings();
+await sdk.getVaultMyPerformance(vaultId);
+await sdk.getVaultMyPnlChart(vaultId);
+await sdk.getVaultTransactions();
+await sdk.updateVaultDescription({ vaultId, description: "Strategy: long BTC trend" });
+```
+
+### Vault On-Chain Operations
+
+These operations require an up-to-date `SignedPriceFeedData`. The SDK fetches it automatically when not supplied:
+
+```typescript
+await sdk.depositToVault({ vaultId, amount: 100 });          // deposit 100 USDC
+await sdk.requestWithdrawFromVault({ vaultId, shares: 50 }); // request redemption
+await sdk.claimClosedVaultFunds({ vaultId });                // claim from closed vault
+await sdk.closeVault({ vaultId });                           // creator only
+```
+
+### On-Chain Helpers
+
+```typescript
+const balances = await sdk.getChainBalances();         // { sui, usdc, bank }
+const oracle   = await sdk.getOraclePrice("BTC-PERP");
+const pos      = await sdk.getOnChainPosition("BTC-PERP");
+await sdk.closeOnChainPosition({ symbol: "BTC-PERP" });    // close full pos with MARKET reduceOnly
+await sdk.withdrawAllMarginFromBank();
+await sdk.setSubAccount({ account: subAddr, status: true });
+const perpId = sdk.getDeploymentPerpetualID("BTC-PERP");   // resolve from local config
+```
+
+For advanced use cases the underlying primitives are exposed:
+
+```typescript
+sdk.onChain;       // ExchangeOnChain instance
+sdk.sui;           // SuiClient
+sdk.txBuilder;     // TransactionBuilder
+```
+
+### Point / Referral
+
+```typescript
+await sdk.getReferralLink();
+await sdk.changeReferralCode("DIP123");
+await sdk.getInviteeList({ pageNum: 1, pageSize: 20 });
+await sdk.getSeasonInfo();
+await sdk.getTeamBoost();
+await sdk.getUserPoints();
+await sdk.getUserDailyPoints();
+await sdk.getSeasonPoints();
+await sdk.getReferralPoints();
+await sdk.getTeamInfo();
+
+// Commission program:
+await sdk.getReferralProfile();
+await sdk.getReferralDashboard();
+await sdk.getReferralApplication();
+await sdk.postReferralApplication({ name, telegram });
+await sdk.getReferralHistory({ pageNum: 1 });
+await sdk.getReferralCommission({ pageNum: 1 });
+await sdk.postReferralClaim();
+await sdk.getReferralClaimHistory({ pageNum: 1 });
+```
+
+### WebSocket
+
+The SDK ships a lightweight WebSocket client that auto-replays subscriptions on reconnect and supports both browser and Node.js (>=22 — install the `ws` package on older Node):
+
+```typescript
+const ws = sdk.createWsClient({ url: "wss://ws.dipcoin.io/v1" });
+ws.onMessage((msg) => console.log("ws:", msg));
+await ws.connect();
+ws.subscribe({ channel: "ticker", symbol: "BTC-PERP" });
+ws.subscribe({ channel: "orderBook", symbol: "BTC-PERP" });
+ws.subscribe({ channel: "kline", symbol: "BTC-PERP", interval: "1m" });
+// Private channels are auto-authenticated using the SDK's JWT + wallet address.
+ws.subscribe({ channel: "account" });
+ws.subscribe({ channel: "position" });
+```
+
+### Sub-Account Aware Reads
+
+`getAccountInfo` / `getPositions` / `getOpenOrders` accept an optional `parentAddress` parameter so you can read a vault or sub-account's state without instantiating a separate SDK:
+
+```typescript
+await sdk.getAccountInfo(vaultId);
+await sdk.getPositions("BTC-PERP", vaultId);
+await sdk.getOpenOrders(undefined, vaultId);
+```
+
+## Method Index
+
+| Category              | Methods                                                                                                                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth / 1CT            | `authenticate`, `getJWTToken`, `clearAuth`, `setOneClickTradingCredentials`, `getOneClickTradingCredentials`, `enableOneClickTrading`, `disableOneClickTrading`                                                                                                                                     |
+| Trading               | `placeOrder`, `cancelOrder`, `cancelPlanOrder`, `placePositionTpSlOrders`, `getPositionTpSl`, `cancelTpSlOrders`, `adjustLeverage`, `getUserConfig`                                                                                                                                                 |
+| Account / orders      | `getAccountInfo`, `getPositions`, `getOpenOrders`, `getHistoryOrders`, `getFundingSettlements`, `getBalanceChanges`                                                                                                                                                                                |
+| Market                | `getTradingPairs`, `getPerpetualID`, `getOrderBook`, `getTicker`, `getGlobalConfig`, `getVolumes`, `getFundingRateDetail`, `getFundingRateChart`, `getFundingRateHistory`, `getKlineHistory`, `getAnnouncements`, `getNotice`, `getLatestSignedPriceFeed`                                           |
+| API accounts          | `listApiAccounts`, `createApiAccount`, `removeApiAccount`, `getExpired1CTAccounts`                                                                                                                                                                                                                 |
+| Sponsor               | `sponsorValid`, `sponsorCreate`, `sponsorSubmit`                                                                                                                                                                                                                                                   |
+| Vault REST (public)   | `getVaultOverview`, `getVaultConfig`, `getVaultList`, `getVaultDetail`, `getVaultPerformance`, `getVaultValueChart`, `getVaultPNLChart`, `getVaultAccount`, `getVaultPositions`, `getVaultPendingOrders`, `getVaultFilledOrders`, `getVaultFundingHistory`, `getVaultDepositsAndWithdraws`, `getVaultDepositors`, `checkVaultWhitelist` |
+| Vault REST (auth)     | `getVaultMyHoldings`, `getVaultMyPerformance`, `getVaultMyPnlChart`, `getVaultTransactions`, `updateVaultDescription`                                                                                                                                                                              |
+| Vault on-chain        | `depositToVault`, `requestWithdrawFromVault`, `claimClosedVaultFunds`, `closeVault`                                                                                                                                                                                                                |
+| On-chain helpers      | `depositToBank`, `withdrawFromBank`, `withdrawAllMarginFromBank`, `addMargin`, `removeMargin`, `getChainBalances`, `getOraclePrice`, `getOnChainPosition`, `closeOnChainPosition`, `setSubAccount`, `getDeploymentPerpetualID`, `onChain`, `sui`, `txBuilder`                                       |
+| Points / referral     | `getReferralLink`, `changeReferralCode`, `getInviteeList`, `getSeasonInfo`, `getTeamBoost`, `joinTeam`, `checkTeamNickname`, `getUserPoints`, `getUserDailyPoints`, `getSeasonPoints`, `getReferralPoints`, `getTeamInfo`, `getReferralProfile`, `getReferralDashboard`, `getReferralApplication`, `postReferralApplication`, `getReferralHistory`, `getReferralCommission`, `postReferralClaim`, `getReferralClaimHistory` |
+| WebSocket             | `createWsClient` (constructs a pre-authed `WsClient`)                                                                                                                                                                                                                                              |
+
 ## License
 
 Apache License 2.0

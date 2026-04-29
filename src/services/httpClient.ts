@@ -5,6 +5,20 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import { ApiResponse } from "../types";
 
 /**
+ * Extended Axios config understood by HttpClient. Supports per-request
+ * overrides for the X-Wallet-Address / Authorization headers used when
+ * an action should be sent through the 1CT (one-click) sub-account JWT.
+ */
+export interface PerpRequestConfig extends AxiosRequestConfig {
+  /** Override the wallet address header for this single request. */
+  walletAddress?: string;
+  /** Override the JWT used in the Authorization header for this request. */
+  authToken?: string;
+  /** Force the request to be treated as a public endpoint (skip auth). */
+  publicEndpoint?: boolean;
+}
+
+/**
  * HTTP Client for API requests
  */
 export class HttpClient {
@@ -44,23 +58,25 @@ export class HttpClient {
    * Setup request and response interceptors
    */
   private setupInterceptors(): void {
-    // Request interceptor
     this.instance.interceptors.request.use(
       (config) => {
-        // Only add X-Wallet-Address and Authorization headers for /api/perp-trade-api endpoints
-        // Match ts-frontend: only /api/perp-trade-api requests get these headers
+        const cfg = config as PerpRequestConfig;
+        const overrideWallet = cfg.walletAddress;
+        const overrideAuth = cfg.authToken;
+        const treatAsPublic = cfg.publicEndpoint === true || this.isPublicEndpoint(config.url);
+
         if (this.isPerpTradeApiUrl(config.url)) {
-          // Add wallet address header if set
-          // Match ts-frontend: always add X-Wallet-Address for perp-trade-api requests
-          if (this.walletAddress && config.headers) {
-            config.headers["X-Wallet-Address"] = this.walletAddress;
+          const walletAddress = overrideWallet ?? this.walletAddress;
+          if (walletAddress && config.headers) {
+            config.headers["X-Wallet-Address"] = walletAddress;
           }
 
-          // Add authorization header if set and not a public endpoint
-          // Match ts-frontend: don't add Authorization for /public/ endpoints
-          if (this.authToken && config.headers && !this.isPublicEndpoint(config.url)) {
-            config.headers["Authorization"] = `Bearer ${this.authToken}`;
+          const authToken = overrideAuth ?? this.authToken;
+          if (authToken && config.headers && !treatAsPublic) {
+            config.headers["Authorization"] = `Bearer ${authToken}`;
           }
+        } else if (overrideAuth && config.headers && !treatAsPublic) {
+          config.headers["Authorization"] = `Bearer ${overrideAuth}`;
         }
 
         return config;
@@ -78,8 +94,7 @@ export class HttpClient {
       },
       (error) => {
         // Handle error responses
-        const errorMessage =
-          error.response?.data?.message || error.message || "Request failed";
+        const errorMessage = error.response?.data?.message || error.message || "Request failed";
         return Promise.reject(new Error(errorMessage));
       }
     );
@@ -109,7 +124,7 @@ export class HttpClient {
   /**
    * GET request
    */
-  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+  async get<T = any>(url: string, config?: PerpRequestConfig): Promise<ApiResponse<T>> {
     return this.instance.get<ApiResponse<T>>(url, config) as unknown as Promise<ApiResponse<T>>;
   }
 
@@ -119,9 +134,27 @@ export class HttpClient {
   async post<T = any>(
     url: string,
     data?: any,
-    config?: AxiosRequestConfig
+    config?: PerpRequestConfig
   ): Promise<ApiResponse<T>> {
-    return this.instance.post<ApiResponse<T>>(url, data, config) as unknown as Promise<ApiResponse<T>>;
+    return this.instance.post<ApiResponse<T>>(url, data, config) as unknown as Promise<
+      ApiResponse<T>
+    >;
+  }
+
+  /**
+   * PUT request
+   */
+  async put<T = any>(url: string, data?: any, config?: PerpRequestConfig): Promise<ApiResponse<T>> {
+    return this.instance.put<ApiResponse<T>>(url, data, config) as unknown as Promise<
+      ApiResponse<T>
+    >;
+  }
+
+  /**
+   * DELETE request
+   */
+  async delete<T = any>(url: string, config?: PerpRequestConfig): Promise<ApiResponse<T>> {
+    return this.instance.delete<ApiResponse<T>>(url, config) as unknown as Promise<ApiResponse<T>>;
   }
 
   /**
@@ -131,7 +164,7 @@ export class HttpClient {
   async postForm<T = any>(
     url: string,
     data: Record<string, any>,
-    config?: AxiosRequestConfig
+    config?: PerpRequestConfig
   ): Promise<ApiResponse<T>> {
     const formData = new URLSearchParams();
     Object.keys(data).forEach((key) => {
@@ -158,4 +191,3 @@ export class HttpClient {
     }) as unknown as Promise<ApiResponse<T>>;
   }
 }
-

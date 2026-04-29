@@ -4,6 +4,8 @@
 export * from "./config";
 export * from "./sdk";
 export { HttpClient } from "./services/httpClient";
+export type { PerpRequestConfig } from "./services/httpClient";
+export { WsClient } from "./services/wsClient";
 export * from "./types";
 export * from "./utils";
 export * from "./constants";
@@ -30,4 +32,3 @@ export function initDipCoinPerpSDK(
 
 // Default export
 export default DipCoinPerpSDK;
-

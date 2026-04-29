@@ -23,5 +23,3 @@ export function initSDKOptions(
     customRpc: options.customRpc,
   };
 }
-
-

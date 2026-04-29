@@ -3,6 +3,33 @@ import { nodeResolve } from "@rollup/plugin-node-resolve";
 import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 
+/**
+ * Rollup `external` 默认按整串匹配；`@mysten/sui` 2.x 的入口是子路径（如 `@mysten/sui/client`），
+ * 必须全部标为 external，否则会尝试打入 node_modules 并触发对 `.ts` 依赖解析失败等问题。
+ */
+function isExternal(id) {
+  if (id.startsWith("@mysten/sui")) return true;
+  if (id.startsWith("@pythnetwork/")) return true;
+  if (id === "@dipcoinlab/perp-ts-library" || id.startsWith("@dipcoinlab/perp-ts-library/"))
+    return true;
+  if (
+    id === "axios" ||
+    id === "bignumber.js" ||
+    id === "buffer" ||
+    id === "node:buffer" ||
+    id === "fs" ||
+    id === "path" ||
+    id === "url" ||
+    id === "node:fs" ||
+    id === "node:path" ||
+    id === "node:url" ||
+    id === "ws"
+  ) {
+    return true;
+  }
+  return false;
+}
+
 var rollup_config = [
   {
     input: "src/index.ts",
@@ -28,7 +55,7 @@ var rollup_config = [
     ],
     plugins: [
       nodeResolve({
-        preferBuiltins: false,
+        preferBuiltins: true,
       }),
       commonjs(),
       typescript({
@@ -42,18 +69,7 @@ var rollup_config = [
         },
       }),
     ],
-    external: [
-      "axios",
-      "@mysten/sui",
-      "@dipcoinlab/perp-ts-library",
-      "bignumber.js",
-      "buffer",
-      "node:buffer",
-      "fs",
-      "path",
-      "url",
-    ],
+    external: isExternal,
   },
 ];
 export { rollup_config as default };
-

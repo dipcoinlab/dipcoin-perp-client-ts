@@ -1,6 +1,13 @@
 {
   "deployer": "0xf5fe6a868bae59c109f8fa82a139a5302bd11587c811606e9938cf435b0f3906",
-  "packages": ["0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001"],
+  "packages": [
+    "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001",
+    "0x9645033a540eaa77aaa4b5f0695759a14e8b7c250ea318ef403ce1d96a4a738f",
+    "0x3d11bc46bb4fbcdef7d17f69ac10e3a471d8f09cf104f94b5113dc2cd1c44fd2",
+    "0x857c7c6e50c5e6574966cf110897b99e8a510f8346b0a60a7604fb917b155086",
+    "0x92df31c1b3e14ac7e54d6e606341f36d2743a1cf45119fda4b4efb83d623276f",
+    "0x6671fbc069c94343bb217ea450993c3168cd8ecb433d1c6be339dafcfb53e68c"
+  ],
   "objects": {
     "ExchangeAdminCap": {
       "id": "0x11d6aebffbd2bd7e149bfa73353d8bfa57942e67da0d730fec65b8c8edaaa7fe",
@@ -85,6 +92,24 @@
       "id": "0x9c78b1bb63de6ceece5be85a7dd6af77bf57a7a989bb51f27e4a2fbabf0ca2db",
       "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
       "package_version": 1
+    },
+    "VaultConfig": {
+      "id": "0x69bae0c198f83acf12656a247dfe85467819139560968669f14b4df0abe8efd7",
+      "owner": "Shared",
+      "dataType": "0x9645033a540eaa77aaa4b5f0695759a14e8b7c250ea318ef403ce1d96a4a738f::vault::VaultConfig",
+      "package_version": 2
+    },
+    "InsuranceOperatorCap": {
+      "id": "0x90a6cfec2534685b5d579c7c2cb07e20a574c112af68d4e9c1463a80b13b3389",
+      "owner": "Owned",
+      "dataType": "0x3d11bc46bb4fbcdef7d17f69ac10e3a471d8f09cf104f94b5113dc2cd1c44fd2::roles::InsuranceOperatorCap",
+      "package_version": 3
+    },
+    "PriceFeed": {
+      "id": "0x7740de52df896ff8296ed010c67c8604669263c43cf43daa685e7188b6a8bbe4",
+      "owner": "Shared",
+      "dataType": "0x857c7c6e50c5e6574966cf110897b99e8a510f8346b0a60a7604fb917b155086::price_feed::PriceFeed",
+      "package_version": 4
     }
   },
   "markets": {
@@ -541,6 +566,875 @@
         "PriceInfoObject": {
           "owner": "Shared",
           "id": "0x93bfda25cb6b1653a9c769e8216014bd2c06997f3edb479566761fbf2abf6ac2",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "HYPE-PERP": {
+      "Config": {
+        "symbol": "HYPE-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "HYPE",
+        "baseAssetName": "HYPE",
+        "defaultLeverage": "10000000000000000000",
+        "minOrderPrice": "10000000000000000",
+        "maxOrderPrice": "10000000000000000000000",
+        "tickSize": "1000000000000000",
+        "minTradeQty": "100000000000000000",
+        "maxTradeQtyLimit": "5000000000000000000000",
+        "maxTradeQtyMarket": "2500000000000000000000",
+        "stepSize": "100000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0x33b4d2df86102fe9ac7da1080f6b933fd02e228f2b9c2ab6381ccd95b008ee63",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1763007000000,
+        "priceInfoFeedId": "0x4279e31cc369bbcc2faf022b382b080e32a8e689ff20fbc530d2a603eb6cd98b"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x715a2005e6402383107dd4bc1e58f3d3296a764ba7a9bd9706e5aefe09c4e0a5",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0xcac72eb61b217e69fd501f97928f47b4d4a4f748d4d4d671313c8484fe7d78f2",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x7bc2bc2d94a156c47ab36045497073a805e8a8aa6e912a417288a1df11b7d5a6",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x1c047be615eaa5a87afa0e111b20a512dd6c0f4a1f0f691693cf852c1768f35d",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "DOGE-PERP": {
+      "Config": {
+        "symbol": "DOGE-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "DOGE",
+        "baseAssetName": "DOGE",
+        "defaultLeverage": "3000000000000000000",
+        "minOrderPrice": "10000000000000",
+        "maxOrderPrice": "1000000000000000000000",
+        "tickSize": "10000000000000",
+        "minTradeQty": "1000000000000000000",
+        "maxTradeQtyLimit": "800000000000000000000000",
+        "maxTradeQtyMarket": "1600000000000000000000000",
+        "stepSize": "1000000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xdd138b6ba8f24948ea8f9ca426609d66b77cf0cdd9908cfbb218bd71c598a46f",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1768897800000,
+        "priceInfoFeedId": "0xdcef50dd0a4cd2dcc17e45df1676dcb336a11a61c69df7a0299b0150c672d25c"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x1cdba74ebfecfaa37c2669c80b60e28b1e07711b7ad1e4031b92bdd292b7b23e",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0xffad6d1e17715e342e29a510eba3e6e3364895fb47b7e1034e227ac93f96cee3",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x976b04a357e2665febc4c6ba42da4e305b8c8ec22e6fecad1932b45da33dc8c4",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xd59a5f5173424ba725a7d033d86f2eadf2745f87a908bd27e1d27339eff598ce",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "LTC-PERP": {
+      "Config": {
+        "symbol": "LTC-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "LTC",
+        "baseAssetName": "LTC",
+        "defaultLeverage": "3000000000000000000",
+        "minOrderPrice": "1000000000000000",
+        "maxOrderPrice": "70000000000000000000000",
+        "tickSize": "1000000000000000",
+        "minTradeQty": "10000000000000000",
+        "maxTradeQtyLimit": "1500000000000000000000",
+        "maxTradeQtyMarket": "3000000000000000000000",
+        "stepSize": "10000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0x7ac664276e8771b9ed158bfd38c4cd20751ad9ae162502da7abf4243343093c7",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1768897800000,
+        "priceInfoFeedId": "0x6e3f3fa8253588df9326580180233eb791e03b443a3ba7a1d892e73874e19a54"
+      },
+      "Objects": {
+        "Perpetual": {
+          "id": "0x3c2fd2048f0fc33d305f0e0d88422e17bf7278f581c11d639b0de42121fa0aaa",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "BankAccount": {
+          "id": "0xb866489b7b1a7ed8e846793fa320ae91a752f79f79a7850f442aac064447aa21",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x2a3c6c9f84aa3fcb9981e624cc9a9ad7ea395244f8961b446cf045f07b8a585d",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x38bff6edbebb69ebf0c00c085789608986acdcf78186766cce10f0aae18bb465",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "ZEC-PERP": {
+      "Config": {
+        "symbol": "ZEC-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "ZEC",
+        "baseAssetName": "ZEC",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "10000000000000000",
+        "maxOrderPrice": "500000000000000000000000",
+        "tickSize": "10000000000000000",
+        "minTradeQty": "10000000000000000",
+        "maxTradeQtyLimit": "500000000000000000000",
+        "maxTradeQtyMarket": "250000000000000000000",
+        "stepSize": "10000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xf8ba75d7611a98711e86c164bc518a1d4fa97634591c29e2f6de4d6b0c916437",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1768979400000,
+        "priceInfoFeedId": "0xbe9b59d178f0d6a97ab4c343bff2aa69caa1eaae3e9048a65788c529b125bb24"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0xc84cd7b0a3d04dcd5fff881ce9ea708f142f73bb2dc038893e8109f4b268dcca",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0xcb6d2f125dfd05c31bed5f90fe34f7830ab04d795b4be7f26d5bfc25346d8b82",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x309292965fa4dccd47b1f38d18a9861ca24edbb4dc73c6d95015152cb2839d8f",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xcc0f04f341b08fa9f1079f760d6dee779e6fdd46e50594eb931bce07f80c05d3",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "LINK-PERP": {
+      "Config": {
+        "symbol": "LINK-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "LINK",
+        "baseAssetName": "LINK",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "1000000000000000",
+        "maxOrderPrice": "10000000000000000000000",
+        "tickSize": "1000000000000000",
+        "minTradeQty": "100000000000000000",
+        "maxTradeQtyLimit": "12000000000000000000000",
+        "maxTradeQtyMarket": "6000000000000000000000",
+        "stepSize": "100000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xc1c3b114849a00f7148f9aa9536b802e4f05e696c64bc322079e0b2413e14cf2",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1768979400000,
+        "priceInfoFeedId": "0x8ac0c70fff57e9aefdf5edf44b51d62c2d433653cbb2cf5cc06bb115af04d221"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x696edd82ae5764b9afdcc59429803bdb26b841a3665aec33b0e59579de5641d9",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0x20e05ebcf5767d612a3703368f60c75ef143dca7b87b648ebbe8735dedb3bef8",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x254f5df486fd80a0237b7e1598ea3bd417855a7ebdb194d99f44b166289945eb",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xd26b7be498beb5e6eb0e99b644021d0e603af12ff58f2728ea87202f2578e5cc",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "AAVE-PERP": {
+      "Config": {
+        "symbol": "AAVE-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "AAVE",
+        "baseAssetName": "AAVE",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "10000000000000000",
+        "maxOrderPrice": "150000000000000000000000",
+        "tickSize": "10000000000000000",
+        "minTradeQty": "10000000000000000",
+        "maxTradeQtyLimit": "1000000000000000000000",
+        "maxTradeQtyMarket": "500000000000000000000",
+        "stepSize": "10000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0x22bfaf912d5488913acbba94d83a52f8f8b7b5a2d692c25ca9fb4764d33af88b",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1768979400000,
+        "priceInfoFeedId": "0x2b9ab1e972a281585084148ba1389800799bd4be63b957507db1349314e47445"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x48a6b0ef28f4037ad51c5ab150716c790ada66425272ab66e9aeac713f270912",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0x9631f33dc144dbb734fd719e412650ebebfa2db24e7a3251afb5b11a92efea01",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x07ecd125fc8b27f01dffc72f20d3d24907930b1ccb546fa27d67001438668eb2",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x4d1862d9ca2ad1f054f606220c22e0bcf37330d57bb82baa2063fd8193fc24ae",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "TRUMP-PERP": {
+      "Config": {
+        "symbol": "TRUMP-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "TRUMP",
+        "baseAssetName": "TRUMP",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "100000000000000",
+        "maxOrderPrice": "50000000000000000000000",
+        "tickSize": "100000000000000",
+        "minTradeQty": "100000000000000000",
+        "maxTradeQtyLimit": "30000000000000000000000",
+        "maxTradeQtyMarket": "15000000000000000000000",
+        "stepSize": "100000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0x888f6a8ee8107c18809b73faac384a385cee4493e81922bdde8cc33d17f25897",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1768979400000,
+        "priceInfoFeedId": "0x879551021853eec7a7dc827578e8e69da7e4fa8148339aa0d3d5296405be4b1a"
+      },
+      "Objects": {
+        "Perpetual": {
+          "id": "0x975975cc3d44b8ce7716b7763c2b6120316a02a0b2344bb1ba98a305b14e9084",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "BankAccount": {
+          "id": "0xbc2efd4ccadd5937f2e7d81cc30b036ef6b6d4f7c8b19ec09ac564d8f2907c77",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x1ec4fe477e72ec9da59a53966577e95bcebd281b3bea8c3e65e581bd56f34ae6",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xd0835474be8cfcc7be4e02fc1bcd85dbdf11a54d061edc302e611ca304f57b14",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "PAXG-PERP": {
+      "Config": {
+        "symbol": "PAXG-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "PAXG",
+        "baseAssetName": "PAXG",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "100000000000000000",
+        "maxOrderPrice": "150000000000000000000000",
+        "tickSize": "100000000000000000",
+        "minTradeQty": "1000000000000000",
+        "maxTradeQtyLimit": "40000000000000000000",
+        "maxTradeQtyMarket": "20000000000000000000",
+        "stepSize": "1000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xd5a570e006c41f6d288447e68572219794d77e1eccda7e473733b24d9a92729a",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1769583900000,
+        "priceInfoFeedId": "0x273717b49430906f4b0c230e99aa1007f83758e3199edbc887c0d06c3e332494"
+      },
+      "Objects": {
+        "Perpetual": {
+          "id": "0x140c00316ab68f7eab8ab082bc8b4ff7e8111a619f473f89f5cd3c2a28c98a6b",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "BankAccount": {
+          "id": "0xcc4908ec2da647aa7f7a8798a534961779b3a96272a03fdaeaf1f1ad1e6141a3",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x8fca67bc20df49b4f8964a9444c3c1506f2507a9e471d04dd2fee547582c7677",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x78394446b806dcd3b26011b1c7fcfab104f95b718299bc98ff730983105bf943",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "AXS-PERP": {
+      "Config": {
+        "symbol": "AXS-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "AXS",
+        "baseAssetName": "AXS",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "1000000000000000",
+        "maxOrderPrice": "150000000000000000000000",
+        "tickSize": "1000000000000000",
+        "minTradeQty": "1000000000000000000",
+        "maxTradeQtyLimit": "80000000000000000000000",
+        "maxTradeQtyMarket": "40000000000000000000000",
+        "stepSize": "1000000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xa1ac0809f1c8b0fdb8b3d8042d5e311a761c100c6df6ff118e2ede9778c8035a",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1769583900000,
+        "priceInfoFeedId": "0xb7e3904c08ddd9c0c10c6d207d390fd19e87eb6aab96304f571ed94caebdefa0"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x86d1a4e74595791cb26f0c16713a38e5b96524ddb8257eb98810143443ce7a6b",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0xc305336d6eb9d7abad04972352c428cb6ef285c52cca9b1b7442481cd5bf320f",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x74e653bf0a0d9a61f0e5f7fa1dd8cd31834bbf9a5b22a3496388358869ae5586",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x277be485cc4a095733f1e4938b5e0195a1718aaf9951afd5803095b7808016fa",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "TRX-PERP": {
+      "Config": {
+        "symbol": "TRX-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "TRX",
+        "baseAssetName": "TRX",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "10000000000000",
+        "maxOrderPrice": "150000000000000000000000",
+        "tickSize": "10000000000000",
+        "minTradeQty": "1000000000000000000",
+        "maxTradeQtyLimit": "600000000000000000000000",
+        "maxTradeQtyMarket": "300000000000000000000000",
+        "stepSize": "1000000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xc37db3e58966c68b5a5752dba7ac74585f1300e871e9f254bd2036742ff447ef",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1769583900000,
+        "priceInfoFeedId": "0x67aed5a24fdad045475e7195c98a98aea119c763f272d4523f5bac93a4f33c2b"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x706028bc90f9d8c2e2d1edb1fd0b603191082c9739bb74f9c5dc18a03b9d83ef",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0xa33248a13df12efaef9d78287df73f0e9983ca2c0a05f13495491644ca29f212",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0xb2da176016a905d9f2bafe62d9017a7332a014650f726328048e1100066f54fd",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0x34d6e013b9dcb3a899f69dda802af9a8afa2193e4049683479c395ea9a5cfbb8",
+          "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
+          "package_version": 1
+        }
+      }
+    },
+    "ADA-PERP": {
+      "Config": {
+        "symbol": "ADA-PERP",
+        "quoteAssetSymbol": "USDC",
+        "quoteAssetName": "Circle USD",
+        "baseAssetSymbol": "ADA",
+        "baseAssetName": "ADA",
+        "defaultLeverage": "20000000000000000000",
+        "minOrderPrice": "100000000000000",
+        "maxOrderPrice": "100000000000000000000000",
+        "tickSize": "100000000000000",
+        "minTradeQty": "1000000000000000000",
+        "maxTradeQtyLimit": "500000000000000000000000",
+        "maxTradeQtyMarket": "250000000000000000000000",
+        "stepSize": "1000000000000000000",
+        "mtbLong": "20000000000000000",
+        "mtbShort": "20000000000000000",
+        "maxAllowedOIOpen": [
+          "5000000000000000000000000",
+          "5000000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "2500000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000",
+          "1000000000000000000000000"
+        ],
+        "initialMarginReq": "45000000000000000",
+        "maintenanceMarginReq": "25000000000000000",
+        "defaultMakerFee": "100000000000000",
+        "defaultTakerFee": "300000000000000",
+        "maxAllowedPriceDiffInOP": "100000000000000000",
+        "maxFundingRate": "10000000000000000",
+        "insuranceActivePool": "0xc49b8b85acbc5fe1d6d7330999a3eb389e8558d6a7e672dc65d70cc287a44cce",
+        "insuranceSecurityPool": "0x554081b6a7a8484bce2200a789b836241ec124dbe22d5f5e499e5ed963af032b",
+        "feePool": "0x2b1dc952ec7c846ff44c1727b820afd694e96e161730be3352d32d1bfa27dc2d",
+        "gasPool": "0xf33822b98b162394c7a6126832b202043e7577c7c40f2d4e61fa0ec994148957",
+        "tradingStartTime": 1769583900000,
+        "priceInfoFeedId": "0x2a01deaec9e51a579277b34b122399984d0bbf57e2458a7e42fecd2829867a0d"
+      },
+      "Objects": {
+        "BankAccount": {
+          "id": "0x15620cb9188b424b6a401d56e19b328bc4e5af2e2cdcbed031064f726bf937bd",
+          "owner": "Owned",
+          "dataType": "0x2::dynamic_field::Field<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::bank::BankAccount>",
+          "package_version": 1
+        },
+        "Perpetual": {
+          "id": "0x0c61742f28acba6a0769f3058cf1c1171fa03bc8385d74162e487d23ae4bc45b",
+          "owner": "Shared",
+          "dataType": "0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::perpetual::Perpetual",
+          "package_version": 1
+        },
+        "PositionsTable": {
+          "owner": "Shared",
+          "id": "0x05db4944c1fe6d30f32db725ed3b568f47dfb3387248bfd17826b0a502274cb8",
+          "dataType": "0x2::table::Table<address, 0x978fed071cca22dd26bec3cf4a5d5a00ab10f39cb8c659bbfdfbec4397241001::position::Position>",
+          "package_version": 1
+        },
+        "PriceInfoObject": {
+          "owner": "Shared",
+          "id": "0xf28e4e40a96948a19805fe76a4da373a262daac47588bac78d73033bce7b5a38",
           "dataType": "0x8d97f1cd6ac663735be08d1d2b6d02a159e711586461306ce60a2b7a6a565a9e::price_info::PriceInfo",
           "package_version": 1
         }

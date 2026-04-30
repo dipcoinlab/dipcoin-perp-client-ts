@@ -67,6 +67,7 @@ export const API_ENDPOINTS = {
   VAULT_OVERVIEW: "/api/perp-vault-api/public/overview",
   VAULT_CONFIG: "/api/perp-vault-api/public/vault-config",
   VAULT_LIST: "/api/perp-vault-api/public/vaults",
+  VAULT_BY_CREATOR: "/api/perp-vault-api/public/vaults/by-creator",
   VAULT_DETAIL: "/api/perp-vault-api/public/vaults/detail",
   VAULT_PERFORMANCE: "/api/perp-vault-api/public/vaults/performance",
   VAULT_VALUE_CURVE: "/api/perp-vault-api/public/vaults/value-curve",
@@ -124,6 +125,8 @@ export const DECIMALS = {
   USDC: 6,
   SUI: 9,
   DEFAULT: 18,
+  /** Vault on-chain numeric fields (`max_cap`, ratios, min deposit, create initial amount, etc.). */
+  VAULT_CONFIG: 18,
 } as const;
 
 /**

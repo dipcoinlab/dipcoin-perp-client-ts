@@ -48,6 +48,14 @@ export class HttpClient {
   }
 
   /**
+   * Authenticated vault API routes (`/api/perp-vault-api/vaults/...`) need the same
+   * `X-Wallet-Address` + `Authorization` treatment as `perp-trade-api` (mirrors ts-frontend).
+   */
+  private isVaultAuthedApiUrl(url?: string): boolean {
+    return url?.startsWith("/api/perp-vault-api/vaults") ?? false;
+  }
+
+  /**
    * Check if URL is a public endpoint (doesn't require auth)
    */
   private isPublicEndpoint(url?: string): boolean {
@@ -65,7 +73,7 @@ export class HttpClient {
         const overrideAuth = cfg.authToken;
         const treatAsPublic = cfg.publicEndpoint === true || this.isPublicEndpoint(config.url);
 
-        if (this.isPerpTradeApiUrl(config.url)) {
+        if (this.isPerpTradeApiUrl(config.url) || this.isVaultAuthedApiUrl(config.url)) {
           const walletAddress = overrideWallet ?? this.walletAddress;
           if (walletAddress && config.headers) {
             config.headers["X-Wallet-Address"] = walletAddress;
@@ -188,6 +196,36 @@ export class HttpClient {
     return this.instance.post<ApiResponse<T>>(url, formData.toString(), {
       ...config,
       headers,
+    }) as unknown as Promise<ApiResponse<T>>;
+  }
+
+  /**
+   * Multipart upload (e.g. vault logo). Lets axios set the boundary; strips default JSON Content-Type.
+   */
+  async postMultipart<T = any>(
+    url: string,
+    formData: FormData,
+    config?: PerpRequestConfig
+  ): Promise<ApiResponse<T>> {
+    return this.instance.post<ApiResponse<T>>(url, formData, {
+      ...config,
+      transformRequest: [
+        (data, headers) => {
+          if (headers && typeof (headers as any).delete === "function") {
+            (headers as any).delete("Content-Type");
+          } else if (headers) {
+            delete (headers as Record<string, unknown>)["Content-Type"];
+          }
+          return data;
+        },
+        ...(Array.isArray(config?.transformRequest)
+          ? config.transformRequest
+          : config?.transformRequest
+            ? [config.transformRequest]
+            : []),
+      ],
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
     }) as unknown as Promise<ApiResponse<T>>;
   }
 }

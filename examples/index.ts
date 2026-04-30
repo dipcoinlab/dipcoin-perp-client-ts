@@ -353,6 +353,128 @@ async function maybeShowMarketData(sdk: DipCoinPerpSDK, symbol: string, enabled:
   }
 }
 
+/** Vault: public REST, authed holdings/detail, and optional on-chain deposit / withdraw request. */
+async function maybeRunVaultExample(sdk: DipCoinPerpSDK, enabled: boolean) {
+  if (!enabled) {
+    console.log("ℹ️  Vault demo skipped (set RUN_VAULT_REST=1 to enable).");
+    return;
+  }
+  logSection("Vault");
+
+  const overview = await sdk.getVaultOverview();
+  console.log("Overview:", overview.status ? overview.data : overview.error);
+
+  const vaultCfg = await sdk.getVaultConfig();
+  console.log("Config:", vaultCfg.status ? vaultCfg.data : vaultCfg.error);
+
+  const list = await sdk.getVaultList();
+  let firstVaultId: string | undefined;
+  if (list.status && list.data?.length) {
+    console.log(`Vault list (first 3 of ${list.data.length}):`);
+    list.data.slice(0, 3).forEach((v: { id?: string; vaultId?: string; name?: string }) => {
+      const id = v.id ?? v.vaultId;
+      console.log("-", id ?? "?", v.name ?? "");
+      if (!firstVaultId && id) {
+        firstVaultId = id;
+      }
+    });
+  } else {
+    console.log("Vault list:", list.error ?? "empty");
+  }
+
+  const vaultId = stringEnv("VAULT_ID", "").trim() || firstVaultId;
+
+  const whitelist = await sdk.checkVaultWhitelist(sdk.address);
+  console.log("Whitelist (this wallet):", whitelist.status ? whitelist.data : whitelist.error);
+
+  const byCreator = await sdk.getVaultsByCreator();
+  console.log("By creator (this wallet):", byCreator.status ? byCreator.data : byCreator.error);
+
+  const myHoldings = await sdk.getVaultMyHoldings();
+  console.log("My holdings:", myHoldings.status ? myHoldings.data : myHoldings.error);
+
+  if (vaultId) {
+    logSection(`Vault drill-down (${vaultId})`);
+    const detail = await sdk.getVaultDetail(vaultId);
+    console.log("Detail:", detail.status ? detail.data : detail.error);
+
+    const performance = await sdk.getVaultPerformance(vaultId);
+    console.log("Performance:", performance.status ? performance.data : performance.error);
+
+    const vAccount = await sdk.getVaultAccount(vaultId);
+    console.log("Perp account:", vAccount.status ? vAccount.data : vAccount.error);
+
+    const vPositions = await sdk.getVaultPositions(vaultId);
+    if (vPositions.status && vPositions.data?.list?.length) {
+      console.log(
+        `Open positions (showing 2 / ${vPositions.data.count}):`,
+        vPositions.data.list.slice(0, 2)
+      );
+    } else {
+      console.log("Positions:", vPositions.status ? vPositions.data : vPositions.error);
+    }
+
+    const myPerf = await sdk.getVaultMyPerformance(vaultId);
+    console.log("My performance:", myPerf.status ? myPerf.data : myPerf.error);
+  } else {
+    console.log(
+      "ℹ️  Set VAULT_ID (or ensure getVaultList returns data) for detail / performance / account."
+    );
+  }
+
+  const vTx = await sdk.getVaultTransactions();
+  if (vTx.status && vTx.data?.list?.length) {
+    console.log(
+      `My vault tx records (first 3 / ${vTx.data.list.length}):`,
+      vTx.data.list.slice(0, 3)
+    );
+  } else {
+    console.log("Vault transactions:", vTx.status ? vTx.data : vTx.error);
+  }
+
+  const depositVaultId = stringEnv("VAULT_DEPOSIT_VAULT_ID", vaultId || "");
+  if (boolEnv("RUN_VAULT_DEPOSIT")) {
+    if (!depositVaultId) {
+      console.error("❌ RUN_VAULT_DEPOSIT=1 requires VAULT_ID or VAULT_DEPOSIT_VAULT_ID.");
+    } else {
+      logSection("Vault deposit (on-chain)");
+      const amt = numberEnv("VAULT_DEPOSIT_AMOUNT", 1);
+      console.log(`Depositing ${amt} USDC to vault ${depositVaultId}...`);
+      try {
+        const tx = await sdk.depositToVault({ vaultId: depositVaultId, amount: amt });
+        console.log("✅ depositToVault digest:", tx?.digest ?? JSON.stringify(tx));
+      } catch (error) {
+        console.error("❌ depositToVault:", error);
+      }
+    }
+  } else {
+    console.log(
+      "ℹ️  On-chain deposit skipped (RUN_VAULT_DEPOSIT=1, VAULT_DEPOSIT_AMOUNT, VAULT_ID | VAULT_DEPOSIT_VAULT_ID)."
+    );
+  }
+
+  const withdrawVaultId = stringEnv("VAULT_WITHDRAW_VAULT_ID", vaultId || "");
+  if (boolEnv("RUN_VAULT_WITHDRAW")) {
+    if (!withdrawVaultId) {
+      console.error("❌ RUN_VAULT_WITHDRAW=1 requires VAULT_ID or VAULT_WITHDRAW_VAULT_ID.");
+    } else {
+      logSection("Vault withdraw request (on-chain)");
+      const shares = stringEnv("VAULT_WITHDRAW_SHARES", "0.01");
+      console.log(`Requesting redemption of ${shares} shares from ${withdrawVaultId}...`);
+      try {
+        const tx = await sdk.requestWithdrawFromVault({ vaultId: withdrawVaultId, shares });
+        console.log("✅ requestWithdrawFromVault digest:", tx?.digest ?? JSON.stringify(tx));
+      } catch (error) {
+        console.error("❌ requestWithdrawFromVault:", error);
+      }
+    }
+  } else {
+    console.log(
+      "ℹ️  On-chain withdraw request skipped (RUN_VAULT_WITHDRAW=1, VAULT_WITHDRAW_SHARES, vault id)."
+    );
+  }
+}
+
 // Handle add/remove margin helper utilities behind env flags.
 async function maybeRunMarginFlow(
   sdk: DipCoinPerpSDK,
@@ -535,7 +657,11 @@ async function main() {
   const network = (process.env.NETWORK as Network) || "testnet";
   const symbol = stringEnv("DEMO_SYMBOL", "BTC-PERP");
 
-  const sdk = initDipCoinPerpSDK(privateKey, { network });
+  const sdk = initDipCoinPerpSDK(privateKey, {
+    network,
+    ...(process.env.API_BASE_URL?.trim() ? { apiBaseUrl: process.env.API_BASE_URL.trim() } : {}),
+    ...(process.env.CUSTOM_RPC?.trim() ? { customRpc: process.env.CUSTOM_RPC.trim() } : {}),
+  });
   console.log("Wallet:", sdk.address);
   console.log("Network:", network);
   console.log("Primary symbol:", symbol);
@@ -606,6 +732,8 @@ async function main() {
     numberEnv("MARGIN_ADD_AMOUNT", 10),
     numberEnv("MARGIN_REMOVE_AMOUNT", 5)
   );
+
+  await maybeRunVaultExample(sdk, boolEnv("RUN_VAULT_REST"));
 
   await maybeRunTpSlFlow(sdk, stringEnv("TPSL_SYMBOL", symbol), perpId);
 

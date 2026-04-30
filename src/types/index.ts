@@ -929,6 +929,8 @@ export interface VaultWithdrawParams {
   shares: number | string;
   /** Optional gas budget */
   gasBudget?: number;
+  /** Optional signed price feed; if omitted, fetched from `GET /api/perp-market-api/price/latest` (same as web app). */
+  signedPriceFeed?: LatestPrice;
 }
 
 export interface VaultCloseParams {
@@ -938,6 +940,93 @@ export interface VaultCloseParams {
   gasBudget?: number;
   /** Optional pre-fetched signed price feed */
   signedPriceFeed?: LatestPrice;
+  /** Symbols for NAV / position valuation (defaults to deployed markets inside {@link TransactionBuilder}). */
+  markets?: string[];
+}
+
+/** User-created vault (matches `vault_createVault` / ts-frontend `createVault`). */
+export interface CreateVaultParams {
+  name: string;
+  trader: string;
+  maxCap: number | string;
+  minDepositAmount?: number | string;
+  creatorMinimumShareRatio?: number | string;
+  creatorProfitShareRatio?: number | string;
+  initialAmount: number | string;
+  gasBudget?: number;
+}
+
+/** Admin-created vault (`vault_createVault_by_manager`). */
+export interface CreateVaultByManagerParams {
+  creator: string;
+  name: string;
+  trader: string;
+  maxCap: number | string;
+  minDepositAmount?: number | string;
+  creatorMinimumShareRatio?: number | string;
+  creatorProfitShareRatio?: number | string;
+  /** Optional manager capability object id (defaults to deployment `ManagerCap`). */
+  managerCapId?: string;
+  gasBudget?: number;
+}
+
+/** Set whether the vault accepts new deposits (“Public deposits”). */
+export interface VaultSetDepositStatusParams {
+  vaultId: string;
+  /** `true` = open deposits, `false` = paused */
+  status: boolean;
+  gasBudget?: number;
+}
+
+/** Update vault max TVL / cap (Modify deposit limit / max cap in app). */
+export interface VaultSetMaxCapParams {
+  vaultId: string;
+  /** Human-readable max cap (encoded with the vault’s on-chain 18-decimal fixed format). */
+  maxCap: number | string;
+  gasBudget?: number;
+}
+
+export interface VaultSetMinDepositAmountParams {
+  vaultId: string;
+  minDepositAmount: number | string;
+  gasBudget?: number;
+}
+
+export interface VaultSetFollowerMaxCapParams {
+  vaultId: string;
+  followerMaxCap: number | string;
+  gasBudget?: number;
+}
+
+export interface VaultSetAutoCloseOnWithdrawParams {
+  vaultId: string;
+  autoCloseOnWithdraw: boolean;
+  gasBudget?: number;
+}
+
+export interface VaultSetTraderParams {
+  vaultId: string;
+  newTrader: string;
+  gasBudget?: number;
+}
+
+export interface VaultRemoveParams {
+  vaultId: string;
+  gasBudget?: number;
+}
+
+export interface VaultFillWithdrawalRequestsParams {
+  vaultId: string;
+  withdrawalRequestIds: string[];
+  gasBudget?: number;
+  signedPriceFeed?: LatestPrice;
+  markets?: string[];
+}
+
+export interface VaultUpdateSharePriceParams {
+  vaultId: string;
+  signedPriceFeed?: LatestPrice;
+  markets?: string[];
 }
 
 // ---------------- WebSocket ----------------

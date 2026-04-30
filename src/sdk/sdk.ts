@@ -33,6 +33,8 @@ import {
   ChainBalances,
   CloseOnChainPositionParams,
   CreateApiAccountParams,
+  CreateVaultByManagerParams,
+  CreateVaultParams,
   DipCoinPerpSDKOptions,
   FundingRateChartPoint,
   FundingRateDetail,
@@ -77,11 +79,20 @@ import {
   VaultConfig,
   VaultDepositParams,
   VaultDetail,
+  VaultFillWithdrawalRequestsParams,
   VaultListItem,
   VaultMyHoldings,
   VaultMyPerformance,
   VaultOverview,
   VaultPerformance,
+  VaultRemoveParams,
+  VaultSetAutoCloseOnWithdrawParams,
+  VaultSetDepositStatusParams,
+  VaultSetFollowerMaxCapParams,
+  VaultSetMaxCapParams,
+  VaultSetMinDepositAmountParams,
+  VaultSetTraderParams,
+  VaultUpdateSharePriceParams,
   VaultWithdrawParams,
   VolumesSummary,
   WsClientOptions,
@@ -167,6 +178,16 @@ export class DipCoinPerpSDK {
    */
   get optionsField(): DipCoinPerpSDKOptions {
     return this.options;
+  }
+
+  /**
+   * Overrides `X-Wallet-Address` for authenticated `perp-trade-api` and
+   * `perp-vault-api/vaults/...` requests. Defaults to the SDK keypair address.
+   * Use when reproducing the web app’s vault sub-account REST context with the
+   * same onboarding JWT from {@link authenticate}.
+   */
+  setApiWalletAddress(address: string): void {
+    this.httpClient.setWalletAddress(address);
   }
 
   /**
@@ -2784,6 +2805,23 @@ export class DipCoinPerpSDK {
     );
   }
 
+  /**
+   * Vault object ids / metadata for vaults created by a wallet (public).
+   * Mirrors ts-frontend `GET /api/perp-vault-api/public/vaults/by-creator`.
+   */
+  async getVaultsByCreator(walletAddress?: string): Promise<SDKResponse<any>> {
+    const addr = walletAddress ?? this.walletAddress;
+    return this.publicCall<any, any>(
+      () =>
+        this.httpClient.get<any>(API_ENDPOINTS.VAULT_BY_CREATOR, {
+          params: { address: addr },
+          publicEndpoint: true,
+        }),
+      (resp) => ({ status: true, data: resp.data ?? [] }),
+      "Failed to load vaults by creator"
+    );
+  }
+
   /** Detailed info for a single vault. */
   async getVaultDetail(vaultId: string): Promise<SDKResponse<VaultDetail>> {
     if (!vaultId) return { status: false, error: "vaultId is required" };
@@ -2986,12 +3024,15 @@ export class DipCoinPerpSDK {
     }));
   }
 
-  /** Whitelist check for vault deposits. Public. */
+  /** Whitelist check for vault creators / depositors. Public. Uses `creator` query (ts-frontend). */
   async checkVaultWhitelist(
-    address?: string
+    creator?: string
   ): Promise<SDKResponse<{ inWhitelist: boolean; [key: string]: any }>> {
     const params: Record<string, any> = {};
-    if (address) params.address = address;
+    const addr = creator ?? this.walletAddress;
+    if (addr) {
+      params.creator = addr;
+    }
     return this.publicCall<any, any>(
       () =>
         this.httpClient.get<any>(API_ENDPOINTS.VAULT_WHITELIST_CHECK, {
@@ -3102,9 +3143,80 @@ export class DipCoinPerpSDK {
     );
   }
 
+  /**
+   * Upload a vault logo (creator only). `file` can be a web `Blob` or Node `Buffer`.
+   * Field names match ts-frontend (`file`, `vaultId`).
+   */
+  async uploadVaultLogo(params: {
+    vaultId: string;
+    file: Blob | Buffer;
+    filename?: string;
+  }): Promise<SDKResponse<any>> {
+    if (!params?.vaultId) {
+      return { status: false, error: "vaultId is required" };
+    }
+    const form = new FormData();
+    const name = params.filename ?? "logo.png";
+    if (typeof Blob !== "undefined" && params.file instanceof Blob) {
+      form.append("file", params.file, name);
+    } else {
+      form.append("file", new Blob([params.file as Uint8Array]), name);
+    }
+    form.append("vaultId", params.vaultId);
+    return this.authedCall<any, any>(
+      () => this.httpClient.postMultipart<any>(API_ENDPOINTS.VAULT_UPLOAD_LOGO, form),
+      (resp) => ({ status: true, data: resp.data }),
+      "Failed to upload vault logo"
+    );
+  }
+
   // =======================================================================
   //  Vault on-chain helpers (use SignedPriceFeedData)
   // =======================================================================
+
+  /** Create a vault (normal user flow). Numeric fields use `DECIMALS.VAULT_CONFIG` (18) wei encoding. */
+  async createVault(params: CreateVaultParams): Promise<SuiTransactionBlockResponse> {
+    const d = DECIMALS.VAULT_CONFIG;
+    return this.exchangeOnChain.createVault(
+      {
+        name: params.name,
+        trader: params.trader,
+        maxCap: formatNormalToWei(params.maxCap, d),
+        minDepositAmount: formatNormalToWei(params.minDepositAmount ?? "0", d),
+        creatorMinimumShareRatio: formatNormalToWei(params.creatorMinimumShareRatio ?? "0.05", d),
+        creatorProfitShareRatio: formatNormalToWei(params.creatorProfitShareRatio ?? "0.2", d),
+        initialAmount: formatNormalToWei(params.initialAmount, d),
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  /**
+   * Create a vault as protocol manager (`vault::create_vault_by_manager`).
+   * Optionally pass `managerCapId` when not using the default deployment cap.
+   */
+  async createVaultByManager(
+    params: CreateVaultByManagerParams
+  ): Promise<SuiTransactionBlockResponse> {
+    const d = DECIMALS.VAULT_CONFIG;
+    const tx = this.transactionBuilder.vault_createVaultByManagerTx(
+      {
+        creator: params.creator,
+        name: params.name,
+        trader: params.trader,
+        maxCap: formatNormalToWei(params.maxCap, d),
+        minDepositAmount: formatNormalToWei(params.minDepositAmount ?? "0", d),
+        creatorMinimumShareRatio: formatNormalToWei(params.creatorMinimumShareRatio ?? "0.05", d),
+        creatorProfitShareRatio: formatNormalToWei(params.creatorProfitShareRatio ?? "0.2", d),
+        managerCapID: params.managerCapId,
+      },
+      undefined,
+      params.gasBudget,
+      this.keypair.toSuiAddress()
+    );
+    return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
+  }
 
   /** Deposit USDC into a vault (auto-fetches signed price feed if not provided). */
   async depositToVault(params: VaultDepositParams): Promise<SuiTransactionBlockResponse> {
@@ -3120,21 +3232,47 @@ export class DipCoinPerpSDK {
     );
   }
 
-  /** Request withdrawal of vault shares (no NAV update needed). */
+  /**
+   * Request vault share redemption. Prepends signed price feed on the same PTB (matches web app).
+   */
   async requestWithdrawFromVault(
     params: VaultWithdrawParams
   ): Promise<SuiTransactionBlockResponse> {
-    return this.exchangeOnChain.requestWithdrawFromVault(
+    const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
+    const tx = new Transaction();
+    this.transactionBuilder.buildSignedPriceFeedTx(signedPriceFeed, tx);
+    this.transactionBuilder.vault_requestWithdrawTx(
       {
         vaultID: params.vaultId,
         shares: formatNormalToWei(params.shares),
+      },
+      tx,
+      params.gasBudget,
+      this.keypair.toSuiAddress()
+    );
+    return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
+  }
+
+  /**
+   * Operator / creator fills pending withdrawal requests after NAV update (matches `processWithdrawRequest`).
+   */
+  async fillVaultWithdrawalRequests(
+    params: VaultFillWithdrawalRequestsParams
+  ): Promise<SuiTransactionBlockResponse> {
+    const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
+    return this.exchangeOnChain.fillWithdrawalRequests(
+      {
+        vaultID: params.vaultId,
+        withdrawalRequestIDs: params.withdrawalRequestIds,
+        signedPriceFeed,
+        markets: params.markets,
         gasBudget: params.gasBudget,
       },
       this.keypair
     );
   }
 
-  /** Claim funds from a closed vault. */
+  /** Claim USDC from a vault that is already closed. */
   async claimClosedVaultFunds(params: {
     vaultId: string;
     gasBudget?: number;
@@ -3145,7 +3283,7 @@ export class DipCoinPerpSDK {
     );
   }
 
-  /** Close a vault (creator only). */
+  /** Close a vault (creator); requires fresh signed price + optional explicit `markets` for NAV. */
   async closeVault(params: VaultCloseParams): Promise<SuiTransactionBlockResponse> {
     const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
     return this.exchangeOnChain.closeVault(
@@ -3153,9 +3291,108 @@ export class DipCoinPerpSDK {
         vaultID: params.vaultId,
         signedPriceFeed,
         gasBudget: params.gasBudget,
+        markets: params.markets,
       } as any,
       this.keypair
     );
+  }
+
+  /** Remove a vault record (on-chain cleanup; see protocol docs for Preconditions). */
+  async removeVault(params: VaultRemoveParams): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.removeVault(
+      { vaultID: params.vaultId, gasBudget: params.gasBudget },
+      this.keypair
+    );
+  }
+
+  /** Toggle public deposits (`vault::set_deposit_status`). */
+  async setVaultDepositStatus(
+    params: VaultSetDepositStatusParams
+  ): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.setVaultDepositStatus(
+      {
+        vaultID: params.vaultId,
+        status: params.status,
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  /** Update max TVL / cap for a vault (`vault::set_max_cap`). */
+  async setVaultMaxCap(params: VaultSetMaxCapParams): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.setVaultMaxCap(
+      {
+        vaultID: params.vaultId,
+        maxCap: formatNormalToWei(params.maxCap, DECIMALS.VAULT_CONFIG),
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  async setVaultMinDepositAmount(
+    params: VaultSetMinDepositAmountParams
+  ): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.setVaultMinDepositAmount(
+      {
+        vaultID: params.vaultId,
+        minDepositAmount: formatNormalToWei(params.minDepositAmount, DECIMALS.VAULT_CONFIG),
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  async setVaultFollowerMaxCap(
+    params: VaultSetFollowerMaxCapParams
+  ): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.setVaultFollowerMaxCap(
+      {
+        vaultID: params.vaultId,
+        followerMaxCap: formatNormalToWei(params.followerMaxCap, DECIMALS.VAULT_CONFIG),
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  async setVaultAutoCloseOnWithdraw(
+    params: VaultSetAutoCloseOnWithdrawParams
+  ): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.setVaultAutoCloseOnWithdraw(
+      {
+        vaultID: params.vaultId,
+        autoCloseOnWithdraw: params.autoCloseOnWithdraw,
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  async setVaultTrader(params: VaultSetTraderParams): Promise<SuiTransactionBlockResponse> {
+    return this.exchangeOnChain.setVaultTrader(
+      {
+        vaultID: params.vaultId,
+        newTrader: params.newTrader,
+        gasBudget: params.gasBudget,
+      },
+      this.keypair
+    );
+  }
+
+  /**
+   * Build `vault::update_share_price_v2` PTB (price feed + NAV + update). Inspect or dry-run off-chain.
+   */
+  async buildVaultUpdateSharePriceTx(
+    params: VaultUpdateSharePriceParams
+  ): Promise<Transaction> {
+    const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
+    return this.exchangeOnChain.getUpdateSharePriceTx({
+      vaultID: params.vaultId,
+      signedPriceFeed,
+      markets: params.markets,
+    });
   }
 
   // =======================================================================

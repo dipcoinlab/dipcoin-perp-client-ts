@@ -4,8 +4,10 @@ import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 
 /**
- * Rollup `external` 默认按整串匹配；`@mysten/sui` 2.x 的入口是子路径（如 `@mysten/sui/client`），
- * 必须全部标为 external，否则会尝试打入 node_modules 并触发对 `.ts` 依赖解析失败等问题。
+ * Rollup's `external` matches against the full id by default; `@mysten/sui` 2.x
+ * is consumed via subpaths (e.g. `@mysten/sui/client`), so every prefix has to
+ * be externalized. Otherwise rollup tries to bundle them and fails resolving
+ * their `.ts` dependencies inside node_modules.
  */
 function isExternal(id) {
   if (id.startsWith("@mysten/sui")) return true;

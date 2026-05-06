@@ -529,11 +529,18 @@ export class DipCoinPerpSDK {
       const actionAddress = this.getActionAddress(actionUrl);
       const requestOverride = this.buildOneCtRequestConfig(actionUrl);
 
+      // For vault sub-trader flow: order's `creator` becomes the vault address
+      // (matches `useTrade.placeOrder` in ts-frontend, which uses
+      // `useAccounts.selectedAccount` as the creator). The signature still
+      // comes from the wallet / 1CT keypair — backend resolves the trader
+      // authorization from the vault's on-chain `trader` field.
+      const orderCreator = params.parentAddress ?? actionAddress;
+
       // Build main order object
       // Note: market must be the PerpetualID (e.g., "0xc1b1cf3d774bcfcbd6d71158a4259f2d99fccbf64ffc34f32700f8a771587d99")
       const order = {
         market: market,
-        creator: actionAddress,
+        creator: orderCreator,
         isLong: side === OrderSide.BUY,
         reduceOnly,
         postOnly: false,
@@ -553,7 +560,7 @@ export class DipCoinPerpSDK {
         tpSalt = new BigNumber(Date.now() + 1);
         tpOrder = {
           market: order.market,
-          creator: actionAddress,
+          creator: orderCreator,
           isLong: !order.isLong,
           reduceOnly: true,
           postOnly: false,
@@ -577,7 +584,7 @@ export class DipCoinPerpSDK {
         slSalt = new BigNumber(Date.now() + 2);
         slOrder = {
           market: order.market,
-          creator: actionAddress,
+          creator: orderCreator,
           isLong: !order.isLong,
           reduceOnly: true,
           postOnly: false,
@@ -628,11 +635,14 @@ export class DipCoinPerpSDK {
         price: formatNormalToWei(price || ""), // Match ts-frontend: always use priceWei
         leverage: formatNormalToWei(leverage),
         salt: saltBN.toString(),
-        creator: actionAddress,
+        creator: orderCreator,
         clientId,
         reduceOnly, // Will be sent as boolean in JSON
         orderSignature,
       };
+      if (params.parentAddress) {
+        requestParams.parentAddress = params.parentAddress;
+      }
 
       // Add TP parameters if exists
       if (tpTriggerPrice && tpOrderSignature) {
@@ -823,7 +833,7 @@ export class DipCoinPerpSDK {
         };
       }
 
-      const { symbol, leverage, marginType = "ISOLATED" } = params;
+      const { symbol, leverage, marginType = "ISOLATED", parentAddress } = params;
 
       if (!symbol) {
         throw new Error("Symbol is required for adjusting leverage");
@@ -833,11 +843,14 @@ export class DipCoinPerpSDK {
         throw new Error("Leverage must be greater than zero");
       }
 
-      const payload = {
+      const payload: Record<string, any> = {
         symbol,
         marginType,
         leverage: formatNormalToWei(leverage),
       };
+      if (parentAddress) {
+        payload.parentAddress = parentAddress;
+      }
 
       let response = await this.httpClient.post<OrderResponse>(
         API_ENDPOINTS.ADJUST_LEVERAGE,
@@ -1266,12 +1279,13 @@ export class DipCoinPerpSDK {
   }
 
   /**
-   * Get account information
-   * @returns Account info response
+   * Get account information.
+   *
+   * Pass `parentAddress` to read a vault sub-account snapshot (matches the
+   * `selectedAccount` query in `ts-frontend/src/pages/perp/.../PerpAccount`).
    */
-  async getAccountInfo(): Promise<SDKResponse<AccountInfo>> {
+  async getAccountInfo(parentAddress?: string): Promise<SDKResponse<AccountInfo>> {
     try {
-      // Ensure authenticated before making request
       const authResult = await this.authenticate();
       if (!authResult.status) {
         return {
@@ -1281,7 +1295,8 @@ export class DipCoinPerpSDK {
       }
 
       const response = await this.httpClient.get<AccountInfoResponse>(
-        API_ENDPOINTS.GET_ACCOUNT_INFO
+        API_ENDPOINTS.GET_ACCOUNT_INFO,
+        parentAddress ? { params: { parentAddress } } : undefined
       );
 
       // Handle JWT expiration (code 1000)
@@ -1341,11 +1356,11 @@ export class DipCoinPerpSDK {
   /**
    * Get positions
    * @param symbol Optional symbol filter
+   * @param parentAddress Optional vault / sub-account address to read positions for.
    * @returns Positions response
    */
-  async getPositions(symbol?: string): Promise<SDKResponse<Position[]>> {
+  async getPositions(symbol?: string, parentAddress?: string): Promise<SDKResponse<Position[]>> {
     try {
-      // Ensure authenticated before making request
       const authResult = await this.authenticate();
       if (!authResult.status) {
         return {
@@ -1357,6 +1372,9 @@ export class DipCoinPerpSDK {
       const params: Record<string, any> = {};
       if (symbol) {
         params.symbol = symbol;
+      }
+      if (parentAddress) {
+        params.parentAddress = parentAddress;
       }
 
       const response = await this.httpClient.get<PositionsResponse>(API_ENDPOINTS.GET_POSITIONS, {
@@ -1494,11 +1512,14 @@ export class DipCoinPerpSDK {
   /**
    * Get open orders
    * @param symbol Optional symbol filter
+   * @param parentAddress Optional vault / sub-account address to read orders for.
    * @returns Open orders response
    */
-  async getOpenOrders(symbol?: string): Promise<SDKResponse<OpenOrder[]>> {
+  async getOpenOrders(
+    symbol?: string,
+    parentAddress?: string
+  ): Promise<SDKResponse<OpenOrder[]>> {
     try {
-      // Ensure authenticated before making request
       const authResult = await this.authenticate();
       if (!authResult.status) {
         return {
@@ -1510,6 +1531,9 @@ export class DipCoinPerpSDK {
       const params: Record<string, any> = {};
       if (symbol) {
         params.symbol = symbol;
+      }
+      if (parentAddress) {
+        params.parentAddress = parentAddress;
       }
 
       const response = await this.httpClient.get<OpenOrdersResponse>(
@@ -2000,8 +2024,17 @@ export class DipCoinPerpSDK {
     gasBudget?: number;
     txHash?: string;
   } {
-    const { amount, accountAddress, symbol, market, perpId, subAccountsMapId, gasBudget, txHash } =
-      params;
+    const {
+      amount,
+      accountAddress,
+      parentAddress,
+      symbol,
+      market,
+      perpId,
+      subAccountsMapId,
+      gasBudget,
+      txHash,
+    } = params;
 
     if (!this.isPositiveNumber(amount)) {
       throw new Error(`Amount must be greater than zero to ${action} margin`);
@@ -2021,9 +2054,11 @@ export class DipCoinPerpSDK {
       throw new Error("Either market/symbol or perpId must be provided for margin adjustments");
     }
 
+    // `parentAddress` (vault address) takes precedence over `accountAddress`,
+    // matching `useAccounts.selectedAccount` in ts-frontend's AdjustMarginModal.
     return {
       amount: amountNumber,
-      account: accountAddress || this.walletAddress,
+      account: parentAddress || accountAddress || this.walletAddress,
       market: marketSymbol,
       perpID: resolvedPerpId,
       subAccountsMapID: subAccountsMapId,
@@ -3218,13 +3253,24 @@ export class DipCoinPerpSDK {
     return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
   }
 
-  /** Deposit USDC into a vault (auto-fetches signed price feed if not provided). */
+  /**
+   * Deposit USDC into a vault (auto-fetches signed price feed if not provided).
+   *
+   * NOTE: `vault::deposit` expects amount as a 18-decimal `u128` (matches
+   * `min_deposit_amount` / `max_cap`), NOT USDC's 6 decimals. Passing 6-decimal
+   * wei trips MoveAbort 2037 ("Invalid deposit amount") because the small
+   * value falls below `min_deposit_amount`.
+   */
   async depositToVault(params: VaultDepositParams): Promise<SuiTransactionBlockResponse> {
     const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
+    const amountWei = formatNormalToWei(params.amount, DECIMALS.VAULT_CONFIG);
+    console.log(
+      `[SDK depositToVault] vault=${params.vaultId} amount=${params.amount} -> u128 wei=${amountWei}`
+    );
     return this.exchangeOnChain.depositToVault(
       {
         vaultID: params.vaultId,
-        amount: formatNormalToWei(params.amount, DECIMALS.USDC),
+        amount: amountWei,
         signedPriceFeed,
         gasBudget: params.gasBudget,
       } as any,
@@ -3234,10 +3280,20 @@ export class DipCoinPerpSDK {
 
   /**
    * Request vault share redemption. Prepends signed price feed on the same PTB (matches web app).
+   *
+   * Performs the same lock-period pre-check the web app does (mirrors
+   * `WithdrawFromVaultLayer`): fetches `vaultConfig.lockPeriodMs` and the
+   * caller's `lastDepositTimeMs`, and throws a friendly error before sending
+   * the transaction. This avoids burning gas on a guaranteed MoveAbort 2038
+   * ("Vault withdrawal locked"). Skip the check by passing
+   * `{ skipLockCheck: true }`.
    */
   async requestWithdrawFromVault(
-    params: VaultWithdrawParams
+    params: VaultWithdrawParams & { skipLockCheck?: boolean }
   ): Promise<SuiTransactionBlockResponse> {
+    if (!params.skipLockCheck) {
+      await this.assertVaultWithdrawUnlocked(params.vaultId);
+    }
     const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
     const tx = new Transaction();
     this.transactionBuilder.buildSignedPriceFeedTx(signedPriceFeed, tx);
@@ -3251,6 +3307,32 @@ export class DipCoinPerpSDK {
       this.keypair.toSuiAddress()
     );
     return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
+  }
+
+  /**
+   * Throw if the caller's withdrawal would hit MoveAbort 2038. Best-effort:
+   * if either request fails (e.g. wallet has never deposited) we let the call
+   * proceed so we don't false-positive on uninvolved users.
+   */
+  private async assertVaultWithdrawUnlocked(vaultId: string): Promise<void> {
+    const [config, perf] = await Promise.all([
+      this.getVaultConfig(),
+      this.getVaultMyPerformance(vaultId),
+    ]);
+    const lockPeriodMs = Number(config.data?.lockPeriodMs ?? 0);
+    const lastDepositTimeMs = Number(perf.data?.lastDepositTimeMs ?? 0);
+    if (!lockPeriodMs || !lastDepositTimeMs) return;
+    const elapsed = Date.now() - lastDepositTimeMs;
+    if (elapsed < lockPeriodMs) {
+      const unlockAt = new Date(lastDepositTimeMs + lockPeriodMs);
+      const remainingSec = Math.ceil((lockPeriodMs - elapsed) / 1000);
+      throw new Error(
+        `Vault withdrawal is still locked. Last deposit at ${new Date(
+          lastDepositTimeMs
+        ).toISOString()}, lock period ${lockPeriodMs}ms; unlocks at ${unlockAt.toISOString()} (~${remainingSec}s left). ` +
+          `Pass { skipLockCheck: true } to bypass the client-side guard.`
+      );
+    }
   }
 
   /**

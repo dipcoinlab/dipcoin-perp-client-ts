@@ -99,6 +99,14 @@ export interface PlaceOrderParams {
   slOrderType?: OrderType;
   /** Stop loss order price */
   slOrderPrice?: number | string;
+  /**
+   * Optional parent / sub-account address. Set to a vault address when the
+   * caller is trading on behalf of a vault (vault creator / trader): the
+   * order's on-chain `creator` will be the vault and the request body will
+   * carry `parentAddress` so the backend attributes the order to the vault.
+   * Mirrors the `selectedAccount` flow in `ts-frontend/src/pages/perp`.
+   */
+  parentAddress?: string;
 }
 
 /**
@@ -123,6 +131,11 @@ export interface AdjustLeverageParams {
   leverage: number | string;
   /** Margin type (defaults to ISOLATED to match frontend) */
   marginType?: string;
+  /**
+   * Optional vault / sub-account address. Pass to set the preferred
+   * leverage for a vault (matches `SetLeverageLayer` in `ts-frontend`).
+   */
+  parentAddress?: string;
 }
 
 /**
@@ -323,6 +336,12 @@ export interface MarginAdjustmentParams {
   perpId?: string;
   /** Override account address (defaults to SDK wallet) */
   accountAddress?: string;
+  /**
+   * Vault / sub-account address. When set, used as the on-chain `account`
+   * for `exchange::add_margin` / `exchange::remove_margin` (overrides
+   * `accountAddress`). Mirrors `useAccounts.selectedAccount` in `ts-frontend`.
+   */
+  parentAddress?: string;
   /** Optional sub account table ID */
   subAccountsMapId?: string;
   /** Optional gas budget for transaction */
@@ -831,6 +850,12 @@ export interface VaultOverview {
 export interface VaultConfig {
   maxCap: string;
   vaultCreatingFee: string;
+  /**
+   * Vault withdrawal lock period in **milliseconds**. A `request_withdraw`
+   * within `lockPeriodMs` of the user's last deposit aborts on-chain with
+   * MoveAbort 2038 ("Vault withdrawal locked").
+   */
+  lockPeriodMs?: string;
   [key: string]: any;
 }
 
@@ -908,6 +933,8 @@ export interface VaultMyPerformance {
   shareRatio: string;
   navps: string;
   averagePrice: string;
+  /** Unix milliseconds of the user's last successful deposit; used to gate withdrawals via {@link VaultConfig.lockPeriodMs}. */
+  lastDepositTimeMs?: number;
   [key: string]: any;
 }
 

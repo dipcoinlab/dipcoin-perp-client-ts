@@ -1,6 +1,6 @@
 {
   "name": "@dipcoinlab/perp-client-ts",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "TypeScript SDK for DipCoin Perpetual Trading on Sui blockchain",
   "exports": {
     ".": {

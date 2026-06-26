@@ -1,7 +1,12 @@
 // Copyright (c) 2025 Dipcoin LLC
 // SPDX-License-Identifier: Apache-2.0
 
-import { ExchangeOnChain, OrderSigner, TransactionBuilder } from "@dipcoinlab/perp-ts-library";
+import {
+  ExchangeOnChain,
+  OrderSigner,
+  Payload,
+  TransactionBuilder,
+} from "@dipcoinlab/perp-ts-library";
 import {
   SuiJsonRpcClient,
   getJsonRpcFullnodeUrl,
@@ -10,6 +15,7 @@ import {
 import { Keypair } from "@mysten/sui/cryptography";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import { Connection, type Keypair as SolanaKeypair } from "@solana/web3.js";
 import BigNumber from "bignumber.js";
 import {
   API_ENDPOINTS,
@@ -31,6 +37,7 @@ import {
   CancelPlanOrderParams,
   CancelTpSlOrdersParams,
   ChainBalances,
+  ChainKind,
   CloseOnChainPositionParams,
   CreateApiAccountParams,
   CreateVaultByManagerParams,
@@ -65,6 +72,10 @@ import {
   PositionTpSlOrder,
   PositionsResponse,
   SDKResponse,
+  SolanaDepositParams,
+  SolanaDepositResult,
+  SolanaWithdrawParams,
+  SolanaWithdrawResult,
   SponsorSignResponse,
   SponsorSubmitResponse,
   SubAccountAuthParams,
@@ -106,6 +117,24 @@ import {
   readFile,
   signMessage,
 } from "../utils";
+import {
+  DEFAULT_SOLANA_RPC_URLS,
+  buildSolanaApiSignature,
+  depositForBurnToSui,
+  extractRelayTxDigest,
+  fetchSolBalance,
+  fetchSolanaUsdcBalance,
+  getSolanaUsdcAssociatedTokenAccountBase58,
+  postRelay,
+  signSolanaPayload,
+  solanaKeypairFromPrivateKey,
+  solanaUnifiedDisplay,
+  solanaUnifiedSuiAddress,
+  toRelayUser,
+  waitSolanaCctpDeposit,
+  waitSolanaCctpWithdraw,
+  type CctpNetwork,
+} from "../solana";
 
 /**
  * DipCoin Perpetual Trading SDK
@@ -132,6 +161,23 @@ export class DipCoinPerpSDK {
   /** Optional explicit sub-account keypair (used when oneCT signs trades). */
   private oneClickTradingKeypair?: Keypair;
 
+  /** Chain the SDK signs for ("sui" | "solana"). */
+  private chain: ChainKind;
+  /** CCTP / Solana network ("mainnet" | "testnet"), derived from options.network. */
+  private cctpNetwork: CctpNetwork;
+  /** Solana signing keypair (only set when chain === "solana"). */
+  private solanaKeypair?: SolanaKeypair;
+  /** Solana wallet address (base58, only set when chain === "solana"). */
+  private solanaAddress?: string;
+  /** Solana RPC connection (only set when chain === "solana"). */
+  private solanaConnection?: Connection;
+  /**
+   * On-chain Sui-format identity. For Sui this equals `walletAddress`; for
+   * Solana it is the blake2b-derived unified address used to read the Bank /
+   * positions on Sui (matches the dApp's `currentAccount` unified identity).
+   */
+  private unifiedSuiAddress: string;
+
   /**
    * Initialize SDK
    * @param privateKey Private key string or keypair
@@ -140,21 +186,47 @@ export class DipCoinPerpSDK {
   constructor(privateKey: string | Keypair, options: DipCoinPerpSDKOptions) {
     this.options = options;
     this.httpClient = new HttpClient(options.apiBaseUrl);
+    this.chain = options.chain ?? "sui";
+    this.cctpNetwork = options.network as CctpNetwork;
 
-    // Initialize keypair
-    if (typeof privateKey === "string") {
-      this.keypair = fromExportedKeypair(privateKey);
-    } else {
-      this.keypair = privateKey;
-    }
-
-    // Get wallet address
-    this.walletAddress = this.keypair.getPublicKey().toSuiAddress();
-    this.httpClient.setWalletAddress(this.walletAddress);
     this.deploymentConfig = readFile(`config/deployed/${options.network}/main_contract.json`);
     const rpcUrl = options.customRpc || getJsonRpcFullnodeUrl(options.network);
     this.suiClient = new SuiJsonRpcClient({ url: rpcUrl, network: options.network });
-    this.exchangeOnChain = new ExchangeOnChain(this.deploymentConfig, this.suiClient, this.keypair);
+
+    if (this.chain === "solana") {
+      // Parse the Solana keypair and set up the Solana RPC connection.
+      this.solanaKeypair = solanaKeypairFromPrivateKey(privateKey as any);
+      this.solanaAddress = this.solanaKeypair.publicKey.toBase58();
+      // The account identity used for REST / X-Wallet-Address is the base58
+      // pubkey (matches ts-frontend's `currentAccount.address`).
+      this.walletAddress = this.solanaAddress;
+      // The on-chain Bank / positions are keyed by the blake2b-derived address.
+      this.unifiedSuiAddress = solanaUnifiedSuiAddress(this.solanaAddress);
+      this.solanaConnection = new Connection(
+        options.solanaRpcUrl || DEFAULT_SOLANA_RPC_URLS[this.cctpNetwork],
+        "confirmed"
+      );
+      // ExchangeOnChain requires a Sui signer; for Solana it is only used for
+      // read-only calls (bank balance / positions), so a throwaway keypair is
+      // sufficient. On-chain writes go through CCTP + the relayer instead.
+      this.keypair = new Ed25519Keypair();
+    } else {
+      // Initialize keypair (Sui)
+      if (typeof privateKey === "string") {
+        this.keypair = fromExportedKeypair(privateKey);
+      } else {
+        this.keypair = privateKey;
+      }
+      this.walletAddress = this.keypair.getPublicKey().toSuiAddress();
+      this.unifiedSuiAddress = this.walletAddress;
+    }
+
+    this.httpClient.setWalletAddress(this.walletAddress);
+    this.exchangeOnChain = new ExchangeOnChain(
+      this.deploymentConfig,
+      this.suiClient as any,
+      this.keypair
+    );
 
     const packageId = this.getDeploymentPackageId();
     const protocolConfigId = this.getDeploymentProtocolConfigId();
@@ -171,6 +243,19 @@ export class DipCoinPerpSDK {
    */
   get address(): string {
     return this.walletAddress;
+  }
+
+  /** The chain this SDK signs for ("sui" | "solana"). */
+  get chainKind(): ChainKind {
+    return this.chain;
+  }
+
+  /**
+   * On-chain Sui-format identity. Equals {@link address} on Sui; on Solana it
+   * is the blake2b-derived unified address used to key the Bank / positions.
+   */
+  get onChainAddress(): string {
+    return this.unifiedSuiAddress;
   }
 
   /**
@@ -222,8 +307,11 @@ export class DipCoinPerpSDK {
       // 1. Prepare onboarding message
       const messageBytes = new TextEncoder().encode(ONBOARDING_MESSAGE);
 
-      // 2. Sign the message
-      const signature = await signMessage(this.keypair, messageBytes);
+      // 2. Sign the message (chain-aware: Sui keypair vs Solana Ed25519)
+      const signature =
+        this.chain === "solana"
+          ? buildSolanaApiSignature(messageBytes, this.requireSolanaKeypair())
+          : await signMessage(this.keypair, messageBytes);
 
       // 3. Call authorize endpoint to get JWT token
       const response = await this.httpClient.post<{ token: string }>(API_ENDPOINTS.AUTHORIZE, {
@@ -335,7 +423,43 @@ export class DipCoinPerpSDK {
     if (this.oneClickTrading && this.isActionOrderUrl(url)) {
       return this.oneClickTrading.address;
     }
+    // On Solana the on-chain order `creator` must be the unified display string
+    // `Solana:<base58>` (matches ts-frontend `resolveOrderCreatorAddress`).
+    if (this.chain === "solana" && this.solanaAddress) {
+      return solanaUnifiedDisplay(this.solanaAddress);
+    }
     return this.walletAddress;
+  }
+
+  /** Throw a descriptive error if the Solana keypair is missing. */
+  private requireSolanaKeypair(): SolanaKeypair {
+    if (this.chain !== "solana" || !this.solanaKeypair) {
+      throw new Error("This operation requires the SDK to be initialized with a Solana key.");
+    }
+    return this.solanaKeypair;
+  }
+
+  /** Throw a descriptive error if the Solana connection is missing. */
+  private requireSolanaConnection(): Connection {
+    if (this.chain !== "solana" || !this.solanaConnection) {
+      throw new Error("This operation requires the SDK to be initialized with a Solana key.");
+    }
+    return this.solanaConnection;
+  }
+
+  /**
+   * Sign an action message (order / cancel) for the active chain. On Sui this
+   * uses the provided action keypair (main wallet or 1CT sub-account); on
+   * Solana it uses the Solana Ed25519 keypair and the dash-joined API format.
+   */
+  private async signActionMessage(
+    messageBytes: Uint8Array,
+    suiActionKeypair: Keypair
+  ): Promise<string> {
+    if (this.chain === "solana") {
+      return buildSolanaApiSignature(messageBytes, this.requireSolanaKeypair());
+    }
+    return signMessage(suiActionKeypair, messageBytes);
   }
 
   /** Build per-request override config to route a request through the 1CT JWT. */
@@ -606,14 +730,14 @@ export class DipCoinPerpSDK {
       const orderHashBytes = new TextEncoder().encode(orderMsg);
 
       // Sign main order
-      const orderSignature = await signMessage(actionKeypair, orderHashBytes);
+      const orderSignature = await this.signActionMessage(orderHashBytes, actionKeypair);
 
       // Sign TP order if exists
       let tpOrderSignature: string | undefined;
       if (tpOrder) {
         const tpOrderMsg = OrderSigner.getOrderMessageForUIWallet(tpOrder);
         const tpOrderHashBytes = new TextEncoder().encode(tpOrderMsg);
-        tpOrderSignature = await signMessage(actionKeypair, tpOrderHashBytes);
+        tpOrderSignature = await this.signActionMessage(tpOrderHashBytes, actionKeypair);
       }
 
       // Sign SL order if exists
@@ -621,7 +745,7 @@ export class DipCoinPerpSDK {
       if (slOrder) {
         const slOrderMsg = OrderSigner.getOrderMessageForUIWallet(slOrder);
         const slOrderHashBytes = new TextEncoder().encode(slOrderMsg);
-        slOrderSignature = await signMessage(actionKeypair, slOrderHashBytes);
+        slOrderSignature = await this.signActionMessage(slOrderHashBytes, actionKeypair);
       }
 
       // Build request parameters
@@ -753,8 +877,8 @@ export class DipCoinPerpSDK {
       const cancelOrderObj = { orderHashes };
       const orderHashBytes = new TextEncoder().encode(JSON.stringify(cancelOrderObj));
 
-      // Sign the message (with sub-account when 1CT is enabled)
-      const signature = await signMessage(actionKeypair, orderHashBytes);
+      // Sign the message (with sub-account when 1CT is enabled; chain-aware)
+      const signature = await this.signActionMessage(orderHashBytes, actionKeypair);
 
       // Build request parameters
       // Match ts-frontend and Java: orderHashes should be an array, not a JSON string
@@ -1026,11 +1150,13 @@ export class DipCoinPerpSDK {
       const expirationBN = new BigNumber(0);
       const saltBN = new BigNumber(+new Date());
       const slSaltBN = saltBN.plus(1);
+      // Chain-aware order creator (Solana => `Solana:<base58>`).
+      const orderCreator = this.getActionAddress(API_ENDPOINTS.PLAN_CLOSE_ORDER);
       const planPayloadBase = {
         symbol,
         side,
         leverage: leverageWei,
-        creator: this.walletAddress,
+        creator: orderCreator,
       };
 
       const sendPlanCloseRequest = async (payload: Record<string, any>) => {
@@ -1074,7 +1200,7 @@ export class DipCoinPerpSDK {
 
         const tpOrder = {
           market,
-          creator: this.walletAddress,
+          creator: orderCreator,
           isLong,
           reduceOnly,
           postOnly,
@@ -1088,9 +1214,9 @@ export class DipCoinPerpSDK {
         };
 
         const tpOrderMsg = OrderSigner.getOrderMessageForUIWallet(tpOrder);
-        const tpOrderSignature = await signMessage(
-          this.keypair,
-          new TextEncoder().encode(tpOrderMsg)
+        const tpOrderSignature = await this.signActionMessage(
+          new TextEncoder().encode(tpOrderMsg),
+          this.keypair
         );
 
         tpPayload = {
@@ -1130,7 +1256,7 @@ export class DipCoinPerpSDK {
 
         const slOrder = {
           market,
-          creator: this.walletAddress,
+          creator: orderCreator,
           isLong,
           reduceOnly,
           postOnly,
@@ -1144,9 +1270,9 @@ export class DipCoinPerpSDK {
         };
 
         const slOrderMsg = OrderSigner.getOrderMessageForUIWallet(slOrder);
-        const slOrderSignature = await signMessage(
-          this.keypair,
-          new TextEncoder().encode(slOrderMsg)
+        const slOrderSignature = await this.signActionMessage(
+          new TextEncoder().encode(slOrderMsg),
+          this.keypair
         );
 
         slPayload = {
@@ -1993,7 +2119,9 @@ export class DipCoinPerpSDK {
       return this.exchangeOnChain.executeTxBlock(transaction, this.keypair);
     }
     const fallbackPayload = this.buildMarginCallArgs(params, "add");
-    return this.exchangeOnChain.addMargin(fallbackPayload);
+    return this.exchangeOnChain.addMargin(fallbackPayload, this.keypair, undefined, {
+      gasBudget: params.gasBudget,
+    });
   }
 
   /**
@@ -2006,7 +2134,9 @@ export class DipCoinPerpSDK {
       return this.exchangeOnChain.executeTxBlock(transaction, this.keypair);
     }
     const fallbackPayload = this.buildMarginCallArgs(params, "remove");
-    return this.exchangeOnChain.removeMargin(fallbackPayload);
+    return this.exchangeOnChain.removeMargin(fallbackPayload, this.keypair, undefined, {
+      gasBudget: params.gasBudget,
+    });
   }
 
   /**
@@ -2096,9 +2226,15 @@ export class DipCoinPerpSDK {
       : undefined;
     const baseTx = updatePriceTx || new Transaction();
     if (action === "add") {
-      return this.transactionBuilder.exchange_addMarginTx(payload, baseTx, params.gasBudget);
+      // NOTE: perp-ts-library >=0.0.32 tightened this builder to a
+      // SignedUserPayload-shaped arg; cast preserves the existing Sui flow.
+      return this.transactionBuilder.exchange_addMarginTx(payload as any, baseTx, params.gasBudget);
     }
-    return this.transactionBuilder.exchange_removeMarginTx(payload, baseTx, params.gasBudget);
+    return this.transactionBuilder.exchange_removeMarginTx(
+      payload as any,
+      baseTx,
+      params.gasBudget
+    );
   }
 
   private async buildUpdatePriceTransaction(symbol: string): Promise<Transaction | undefined> {
@@ -2143,6 +2279,11 @@ export class DipCoinPerpSDK {
    * ```
    */
   async depositToBank(amount: number) {
+    if (this.chain === "solana") {
+      throw new Error(
+        "depositToBank() is Sui-only. Use depositToBankFromSolana() to bridge USDC from Solana via CCTP."
+      );
+    }
     return await this.exchangeOnChain.depositToBank(
       {
         amount: formatNormalToWei(amount, DECIMALS.USDC),
@@ -2163,6 +2304,11 @@ export class DipCoinPerpSDK {
    * ```
    */
   async withdrawFromBank(amount: number) {
+    if (this.chain === "solana") {
+      throw new Error(
+        "withdrawFromBank() is Sui-only. Use withdrawFromBankToSolana() to withdraw USDC to a Solana wallet via the relayer."
+      );
+    }
     return await this.exchangeOnChain.withdrawFromBank(
       {
         amount: formatNormalToWei(amount, DECIMALS.USDC),
@@ -2170,6 +2316,191 @@ export class DipCoinPerpSDK {
       },
       this.keypair
     );
+  }
+
+  // =======================================================================
+  //  Solana (CCTP + relayer) asset operations
+  // =======================================================================
+
+  /** Resolve `{ depositBoxId, packageId }` from deployment config (with overrides). */
+  private getCctpDeploymentInfo(overrides?: {
+    cctpDepositBoxId?: string;
+    cctpPackageId?: string;
+  }): { depositBoxId: string; packageId: string } {
+    const cctp = this.deploymentConfig?.cctp ?? {};
+    const depositBoxId =
+      overrides?.cctpDepositBoxId ?? cctp.depositBoxId ?? this.deploymentConfig?.objects?.CctpDepositBox?.id;
+    const packageId = overrides?.cctpPackageId ?? cctp.packageId;
+    if (!depositBoxId) {
+      throw new Error(
+        "Missing CCTP deposit box id (config.cctp.depositBoxId). Pass `cctpDepositBoxId` explicitly."
+      );
+    }
+    if (!packageId) {
+      throw new Error(
+        "Missing CCTP package id (config.cctp.packageId). Pass `cctpPackageId` explicitly."
+      );
+    }
+    return { depositBoxId, packageId };
+  }
+
+  /** USDC Sui coin type (full Move type) from the deployment config. */
+  private getUsdcCoinType(): string {
+    const coinType = this.deploymentConfig?.objects?.Currency?.dataType;
+    if (!coinType) {
+      throw new Error("Missing USDC coin type (objects.Currency.dataType) in deployment config.");
+    }
+    return coinType;
+  }
+
+  /** Bank object id from the deployment config. */
+  private getBankId(): string {
+    const bankId = this.deploymentConfig?.objects?.Bank?.id;
+    if (!bankId) {
+      throw new Error("Missing Bank id (objects.Bank.id) in deployment config.");
+    }
+    return bankId;
+  }
+
+  /**
+   * Deposit USDC from the connected Solana wallet into the DipCoin Sui Bank via
+   * Circle CCTP. Sends a Solana `depositForBurn`, then (by default) polls the
+   * relayer until the Sui-side receive completes.
+   *
+   * Requires `chain: "solana"`. The Solana wallet must hold USDC + a little SOL
+   * for gas and the one-time event account rent.
+   *
+   * @example
+   * ```typescript
+   * const res = await sdk.depositToBankFromSolana({ amount: 10 });
+   * console.log(res.solanaTxHash, res.suiTxHash);
+   * ```
+   */
+  async depositToBankFromSolana(
+    params: SolanaDepositParams & { cctpDepositBoxId?: string; cctpPackageId?: string }
+  ): Promise<SolanaDepositResult> {
+    const keypair = this.requireSolanaKeypair();
+    const connection = this.requireSolanaConnection();
+    const { depositBoxId, packageId } = this.getCctpDeploymentInfo(params);
+
+    const amountMinUnits = formatNormalToWei(params.amount, DECIMALS.USDC);
+    if (new BigNumber(amountMinUnits).isLessThanOrEqualTo(0)) {
+      throw new Error("Invalid deposit amount");
+    }
+
+    const { txHash } = await depositForBurnToSui({
+      connection,
+      keypair,
+      network: this.cctpNetwork,
+      packageId,
+      cctpDepositBoxId: depositBoxId,
+      amount: amountMinUnits,
+    });
+
+    const result: SolanaDepositResult = { solanaTxHash: txHash };
+    if (params.waitForSui !== false) {
+      try {
+        result.suiTxHash = await waitSolanaCctpDeposit(this.httpClient, txHash, {
+          intervalMs: params.pollIntervalMs,
+          timeoutMs: params.timeoutMs,
+        });
+      } catch (e) {
+        // The Solana burn succeeded; surface the wait error but keep the tx hash.
+        throw new Error(
+          `Solana deposit broadcast (tx ${txHash}) but Sui receive wait failed: ${formatError(e)}`
+        );
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Withdraw USDC from the DipCoin Sui Bank back to the connected Solana wallet
+   * via the relayer. Signs a `Payload.withdrawal_solana` with the Solana
+   * keypair and submits it to `/api/perp-relayer/v1/relay`.
+   *
+   * Requires `chain: "solana"`. The destination USDC associated token account
+   * (ATA) is derived from the wallet address.
+   *
+   * @example
+   * ```typescript
+   * const res = await sdk.withdrawFromBankToSolana({ amount: 10 });
+   * console.log(res.suiTxHash);
+   * ```
+   */
+  async withdrawFromBankToSolana(params: SolanaWithdrawParams): Promise<SolanaWithdrawResult> {
+    const keypair = this.requireSolanaKeypair();
+    const solanaAddress = this.solanaAddress as string;
+
+    const bankId = this.getBankId();
+    const coinType = this.getUsdcCoinType();
+    const userAta = getSolanaUsdcAssociatedTokenAccountBase58(solanaAddress, this.cctpNetwork);
+    if (!userAta) {
+      throw new Error("Failed to derive USDC ATA for the current Solana wallet.");
+    }
+
+    const amountMinUnits = formatNormalToWei(params.amount, DECIMALS.USDC);
+    if (new BigNumber(amountMinUnits).isLessThanOrEqualTo(0)) {
+      throw new Error("Invalid withdraw amount");
+    }
+
+    // Authenticate so the relay request carries the onboarding JWT.
+    const authResult = await this.authenticate();
+    if (!authResult.status) {
+      throw new Error(authResult.error || "Authentication failed");
+    }
+
+    const salt = Date.now().toString();
+    const expiration = (Date.now() + 30 * 60 * 1000).toString();
+    const userIdentifier = `Solana:${solanaAddress}`;
+
+    const payloadStr = Payload.withdrawal_solana({
+      bank: bankId,
+      coinType,
+      user: userIdentifier,
+      destination: userIdentifier,
+      tokenAccount: `Solana:${userAta}`,
+      amount: amountMinUnits,
+      salt,
+      expiration,
+    });
+
+    const signed = signSolanaPayload(payloadStr, keypair);
+
+    const relayRes = await postRelay(
+      this.httpClient,
+      {
+        action: "Withdraw",
+        user: toRelayUser("solana", solanaAddress),
+        params: {
+          bank: bankId,
+          coinType,
+          user: userIdentifier,
+          destination: userIdentifier,
+          tokenAccount: `Solana:${userAta}`,
+          amount: amountMinUnits,
+          salt,
+          expiration,
+        },
+        signature: signed.signature,
+        publicKey: signed.publicKey,
+      },
+      { authToken: this.jwtToken }
+    );
+
+    const suiTxHash = extractRelayTxDigest(relayRes);
+    if (!suiTxHash) {
+      throw new Error("Relay did not return a Sui tx digest");
+    }
+
+    const result: SolanaWithdrawResult = { suiTxHash };
+    if (params.waitForSolana) {
+      result.solanaTxHash = await waitSolanaCctpWithdraw(this.httpClient, suiTxHash, {
+        intervalMs: params.pollIntervalMs,
+        timeoutMs: params.timeoutMs,
+      });
+    }
+    return result;
   }
 
   // =======================================================================
@@ -3221,9 +3552,10 @@ export class DipCoinPerpSDK {
         creatorMinimumShareRatio: formatNormalToWei(params.creatorMinimumShareRatio ?? "0.05", d),
         creatorProfitShareRatio: formatNormalToWei(params.creatorProfitShareRatio ?? "0.2", d),
         initialAmount: formatNormalToWei(params.initialAmount, d),
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3301,7 +3633,7 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         shares: formatNormalToWei(params.shares),
-      },
+      } as any,
       tx,
       params.gasBudget,
       this.keypair.toSuiAddress()
@@ -3348,9 +3680,9 @@ export class DipCoinPerpSDK {
         withdrawalRequestIDs: params.withdrawalRequestIds,
         signedPriceFeed,
         markets: params.markets,
-        gasBudget: params.gasBudget,
-      },
-      this.keypair
+      } as any,
+      this.keypair,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3360,8 +3692,10 @@ export class DipCoinPerpSDK {
     gasBudget?: number;
   }): Promise<SuiTransactionBlockResponse> {
     return this.exchangeOnChain.claimClosedVaultFunds(
-      { vaultID: params.vaultId, gasBudget: params.gasBudget },
-      this.keypair
+      { vaultID: params.vaultId },
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3382,8 +3716,9 @@ export class DipCoinPerpSDK {
   /** Remove a vault record (on-chain cleanup; see protocol docs for Preconditions). */
   async removeVault(params: VaultRemoveParams): Promise<SuiTransactionBlockResponse> {
     return this.exchangeOnChain.removeVault(
-      { vaultID: params.vaultId, gasBudget: params.gasBudget },
-      this.keypair
+      { vaultID: params.vaultId },
+      this.keypair,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3395,9 +3730,10 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         status: params.status,
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3407,9 +3743,10 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         maxCap: formatNormalToWei(params.maxCap, DECIMALS.VAULT_CONFIG),
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3420,9 +3757,10 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         minDepositAmount: formatNormalToWei(params.minDepositAmount, DECIMALS.VAULT_CONFIG),
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3433,9 +3771,10 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         followerMaxCap: formatNormalToWei(params.followerMaxCap, DECIMALS.VAULT_CONFIG),
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3446,9 +3785,10 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         autoCloseOnWithdraw: params.autoCloseOnWithdraw,
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3457,9 +3797,10 @@ export class DipCoinPerpSDK {
       {
         vaultID: params.vaultId,
         newTrader: params.newTrader,
-        gasBudget: params.gasBudget,
       },
-      this.keypair
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
   }
 
@@ -3502,6 +3843,30 @@ export class DipCoinPerpSDK {
 
   /** Get USDC + SUI + bank balances for the SDK wallet (or any address). */
   async getChainBalances(address?: string): Promise<SDKResponse<ChainBalances>> {
+    // Solana: native SOL + Solana USDC (wallet), bank keyed by the unified
+    // Sui-format identity.
+    if (this.chain === "solana") {
+      try {
+        const connection = this.requireSolanaConnection();
+        const solanaTarget = address || (this.solanaAddress as string);
+        const bankTarget = address ? solanaUnifiedSuiAddress(address) : this.unifiedSuiAddress;
+        const [sol, usdc, bank] = await Promise.all([
+          fetchSolBalance(connection, solanaTarget),
+          fetchSolanaUsdcBalance(connection, solanaTarget, this.cctpNetwork),
+          this.exchangeOnChain
+            .getUserBankBalance(bankTarget as any)
+            .then((b: any) => {
+              const bn = BigNumber.isBigNumber(b) ? b : new BigNumber(b ?? 0);
+              return bn.dividedBy(new BigNumber(10).pow(DECIMALS.SUI)).toString();
+            })
+            .catch(() => "0"),
+        ]);
+        return { status: true, data: { sui: sol, usdc, bank } };
+      } catch (e) {
+        return { status: false, error: formatError(e) };
+      }
+    }
+
     try {
       const target = address || this.walletAddress;
       const [sui, usdc, bank] = await Promise.all([
@@ -3632,9 +3997,9 @@ export class DipCoinPerpSDK {
         {
           amount: formatNormalToWei(amountUsdcNormal, DECIMALS.USDC),
           accountAddress: this.walletAddress,
-          gasBudget,
         },
-        this.keypair
+        this.keypair,
+        { gasBudget }
       );
     } catch (e) {
       return { status: false, error: formatError(e) };

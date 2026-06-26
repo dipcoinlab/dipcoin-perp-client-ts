@@ -14,11 +14,20 @@ function isExternal(id) {
   if (id.startsWith("@pythnetwork/")) return true;
   if (id === "@dipcoinlab/perp-ts-library" || id.startsWith("@dipcoinlab/perp-ts-library/"))
     return true;
+  // Solana / CCTP stack: keep external so consumers dedupe a single copy and
+  // rollup doesn't try to bundle their large dependency trees.
+  if (id.startsWith("@solana/")) return true;
+  if (id.startsWith("@coral-xyz/")) return true;
   if (
     id === "axios" ||
     id === "bignumber.js" ||
     id === "buffer" ||
     id === "node:buffer" ||
+    id === "bs58" ||
+    id === "tweetnacl" ||
+    id === "ethers" ||
+    id === "crypto" ||
+    id === "node:crypto" ||
     id === "fs" ||
     id === "path" ||
     id === "url" ||

@@ -56,6 +56,15 @@ export class HttpClient {
   }
 
   /**
+   * Relayer routes (`/api/perp-relayer/...`) used for non-Sui (Solana) signed
+   * payload execution. They get the same `X-Wallet-Address` + `Authorization`
+   * treatment as perp-trade-api (mirrors ts-frontend).
+   */
+  private isRelayApiUrl(url?: string): boolean {
+    return url?.startsWith("/api/perp-relayer") ?? false;
+  }
+
+  /**
    * Check if URL is a public endpoint (doesn't require auth)
    */
   private isPublicEndpoint(url?: string): boolean {
@@ -73,7 +82,11 @@ export class HttpClient {
         const overrideAuth = cfg.authToken;
         const treatAsPublic = cfg.publicEndpoint === true || this.isPublicEndpoint(config.url);
 
-        if (this.isPerpTradeApiUrl(config.url) || this.isVaultAuthedApiUrl(config.url)) {
+        if (
+          this.isPerpTradeApiUrl(config.url) ||
+          this.isVaultAuthedApiUrl(config.url) ||
+          this.isRelayApiUrl(config.url)
+        ) {
           const walletAddress = overrideWallet ?? this.walletAddress;
           if (walletAddress && config.headers) {
             config.headers["X-Wallet-Address"] = walletAddress;

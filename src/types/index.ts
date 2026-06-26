@@ -4,6 +4,13 @@
 /**
  * SDK Configuration Interface
  */
+/**
+ * Chain the SDK keypair belongs to. Defaults to `"sui"` for backward
+ * compatibility. When `"solana"`, the private key is parsed as a Solana
+ * keypair and asset / signing flows route through CCTP + the relayer.
+ */
+export type ChainKind = "sui" | "solana";
+
 export interface DipCoinPerpSDKOptions {
   /** API base URL for perp trading */
   apiBaseUrl: string;
@@ -11,6 +18,13 @@ export interface DipCoinPerpSDKOptions {
   network: "mainnet" | "testnet";
   /** Optional custom RPC endpoint for Sui */
   customRpc?: string;
+  /** Chain of the provided private key. Defaults to `"sui"`. */
+  chain?: ChainKind;
+  /**
+   * Optional Solana RPC endpoint (only used when `chain === "solana"`).
+   * Defaults to a public node per network.
+   */
+  solanaRpcUrl?: string;
 }
 
 /**
@@ -781,12 +795,58 @@ export interface SponsorSubmitResponse {
 // ---------------- On-chain helpers ----------------
 
 export interface ChainBalances {
-  /** Native SUI balance in normal units */
+  /** Native gas balance (SUI on Sui, SOL on Solana) in normal units */
   sui: string;
   /** USDC wallet balance (token-defined decimals) in normal units */
   usdc: string;
   /** Bank (exchange) balance in normal units */
   bank: string;
+}
+
+/** Parameters for a Solana CCTP deposit into the DipCoin Sui Bank. */
+export interface SolanaDepositParams {
+  /** USDC amount in standard units (e.g. 10 = 10 USDC). */
+  amount: number | string;
+  /**
+   * When true (default), poll the relayer until the Sui-side receive completes
+   * and include the resulting Sui digest in the result.
+   */
+  waitForSui?: boolean;
+  /** Poll interval in ms while waiting for the Sui receive (default 3000). */
+  pollIntervalMs?: number;
+  /** Overall timeout in ms while waiting for the Sui receive (default 300000). */
+  timeoutMs?: number;
+}
+
+/** Result of a Solana CCTP deposit. */
+export interface SolanaDepositResult {
+  /** Finalized Solana burn transaction hash (base58). */
+  solanaTxHash: string;
+  /** Sui receive/sweep digest, present when `waitForSui` resolved successfully. */
+  suiTxHash?: string;
+}
+
+/** Result of a Solana withdrawal via the relayer. */
+export interface SolanaWithdrawResult {
+  /** Sui transaction digest returned by the relayer. */
+  suiTxHash: string;
+  /** Solana mint/receive tx hash, present when `waitForSolana` resolved. */
+  solanaTxHash?: string;
+}
+
+/** Parameters for a Solana withdrawal (Sui Bank -> Solana wallet via relayer). */
+export interface SolanaWithdrawParams {
+  /** USDC amount in standard units (e.g. 10 = 10 USDC). */
+  amount: number | string;
+  /**
+   * When true, poll the relayer until the Solana-side mint completes and
+   * include the resulting Solana tx hash in the result. Defaults to false.
+   */
+  waitForSolana?: boolean;
+  /** Poll interval in ms while waiting for the Solana mint (default 3000). */
+  pollIntervalMs?: number;
+  /** Overall timeout in ms while waiting for the Solana mint (default 300000). */
+  timeoutMs?: number;
 }
 
 export interface OnChainPosition {

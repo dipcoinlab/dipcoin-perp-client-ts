@@ -1,5 +1,9 @@
 {
   "deployer": "0x74a096bbe8126ab58db4d82cf7efbbef3b85e58560c12e00e9efef9a153882fc",
+  "cctp": {
+    "depositBoxId": "0x370ce69bf7b4c6afed5507f166a01b8de21ab0b2921d82489fa9cb9ab955ca6d",
+    "packageId": "0x45873cf23279c6caab997767d6f70abe9009d06c43d0bc47d245ff3299ca5b8c"
+  },
   "packages": [
     "0x0de11caea463b7ec51adb976774d6bc16ba3054dd95675c8bd06ec74fb7b1c87",
     "0x2220fb7980d802f93aa9864564935c44bbeb4e8861b4182c9f71f7e0600a3525",

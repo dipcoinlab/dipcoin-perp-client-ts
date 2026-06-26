@@ -63,6 +63,11 @@ export const API_ENDPOINTS = {
   SPONSOR_CREATE: "/api/perp-sponsor/sponsor/create",
   SPONSOR_SUBMIT: "/api/perp-sponsor/sponsor/submit",
 
+  // ------------- Relayer (non-Sui / Solana signed payload execution) -------------
+  RELAY: "/api/perp-relayer/v1/relay",
+  CCTP_DEPOSIT_STATUS: "/api/perp-relayer/v1/cctp/deposit/sol/status",
+  CCTP_WITHDRAW_STATUS: "/api/perp-relayer/v1/cctp/withdraw/sol/status",
+
   // ------------- Vault: public -------------
   VAULT_OVERVIEW: "/api/perp-vault-api/public/overview",
   VAULT_CONFIG: "/api/perp-vault-api/public/vault-config",

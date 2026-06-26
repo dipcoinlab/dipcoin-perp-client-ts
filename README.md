@@ -192,6 +192,43 @@ const sdk = initDipCoinPerpSDK(keypair, {
 });
 ```
 
+### Initialize for Solana
+
+The SDK is multi-chain. Pass `chain: "solana"` to sign for a Solana wallet. The
+private key accepts base58, hex, or a JSON byte array (Phantom export works).
+
+```typescript
+const sdk = initDipCoinPerpSDK("your-solana-private-key", {
+  chain: "solana",
+  network: "mainnet",
+  solanaRpcUrl: "https://...", // optional RPC override
+});
+
+sdk.address; // base58 Solana address (used for REST / X-Wallet-Address)
+sdk.onChainAddress; // blake2b-derived Sui-format identity (Bank / positions key)
+```
+
+Authentication and trading (`placeOrder` / `cancelOrder` / TP-SL) work the same
+as Sui — order payloads are signed with the Solana Ed25519 key and the
+`Solana:<base58>` unified creator address.
+
+Because Solana wallets cannot pay Sui gas, **assets move via Circle CCTP and the
+DipCoin relayer** (instead of `depositToBank` / `withdrawFromBank`, which are
+Sui-only):
+
+```typescript
+// Bridge USDC from Solana into the Sui Bank via CCTP (waits for the Sui receive).
+const dep = await sdk.depositToBankFromSolana({ amount: 10 });
+console.log(dep.solanaTxHash, dep.suiTxHash);
+
+// Withdraw USDC from the Sui Bank back to the Solana wallet via the relayer.
+const wd = await sdk.withdrawFromBankToSolana({ amount: 5 });
+console.log(wd.suiTxHash);
+
+// Balances: { sui: <SOL>, usdc: <Solana USDC>, bank: <Sui Bank USDC> }
+const balances = await sdk.getChainBalances();
+```
+
 ## Core Features
 
 ### Authentication (Onboarding)

@@ -9,6 +9,7 @@ export { WsClient } from "./services/wsClient";
 export * from "./types";
 export * from "./utils";
 export * from "./constants";
+export * from "./solana";
 
 // Main SDK initialization function
 import { Keypair } from "@mysten/sui/cryptography";

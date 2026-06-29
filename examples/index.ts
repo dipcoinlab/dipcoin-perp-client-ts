@@ -843,7 +843,7 @@ async function main() {
     boolEnv("RUN_LIMIT_ORDER"),
     process.env.LIMIT_ORDER_QTY || "0.01",
     process.env.LIMIT_ORDER_LEVERAGE || "20",
-    process.env.LIMIT_ORDER_PRICE || "85000",
+    process.env.LIMIT_ORDER_PRICE || "61000",
     toOrderSide(process.env.LIMIT_ORDER_SIDE, OrderSide.BUY)
   );
 

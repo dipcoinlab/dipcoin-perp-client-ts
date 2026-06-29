@@ -11,6 +11,7 @@ import typescript from "@rollup/plugin-typescript";
  */
 function isExternal(id) {
   if (id.startsWith("@mysten/sui")) return true;
+  if (id.startsWith("@noble/")) return true;
   if (id.startsWith("@pythnetwork/")) return true;
   if (id === "@dipcoinlab/perp-ts-library" || id.startsWith("@dipcoinlab/perp-ts-library/"))
     return true;

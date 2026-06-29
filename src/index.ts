@@ -10,6 +10,11 @@ export * from "./types";
 export * from "./utils";
 export * from "./constants";
 export * from "./solana";
+export {
+  SuiGrpcCompatClient,
+  createSuiGrpcClient,
+  getSuiGrpcBaseUrl,
+} from "./sui/grpcClient";
 
 // Main SDK initialization function
 import { Keypair } from "@mysten/sui/cryptography";

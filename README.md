@@ -906,7 +906,7 @@ For advanced use cases the underlying primitives are exposed:
 
 ```typescript
 sdk.onChain;       // ExchangeOnChain instance
-sdk.sui;           // SuiClient
+sdk.sui;           // Sui gRPC client (SuiGrpcCompatClient)
 sdk.txBuilder;     // TransactionBuilder
 ```
 

@@ -6,15 +6,14 @@ import {
   OrderSigner,
   Payload,
   TransactionBuilder,
+  unifiedAddressDisplay,
+  UnifiedAddressChainId,
 } from "@dipcoinlab/perp-ts-library";
-import {
-  SuiJsonRpcClient,
-  getJsonRpcFullnodeUrl,
-  type SuiTransactionBlockResponse,
-} from "@mysten/sui/jsonRpc";
+import type { SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc";
 import { Keypair } from "@mysten/sui/cryptography";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import { SuiGrpcCompatClient, createSuiGrpcClient } from "../sui/grpcClient";
 import { Connection, type Keypair as SolanaKeypair } from "@solana/web3.js";
 import BigNumber from "bignumber.js";
 import {
@@ -148,7 +147,7 @@ export class DipCoinPerpSDK {
   private isAuthenticating = false;
   private exchangeOnChain: ExchangeOnChain;
   private deploymentConfig: any;
-  private suiClient: SuiJsonRpcClient;
+  private suiClient: SuiGrpcCompatClient;
   private transactionBuilder: TransactionBuilder;
   /**
    * Optional 1CT (one-click trading) sub-account credentials. When set,
@@ -190,8 +189,9 @@ export class DipCoinPerpSDK {
     this.cctpNetwork = options.network as CctpNetwork;
 
     this.deploymentConfig = readFile(`config/deployed/${options.network}/main_contract.json`);
-    const rpcUrl = options.customRpc || getJsonRpcFullnodeUrl(options.network);
-    this.suiClient = new SuiJsonRpcClient({ url: rpcUrl, network: options.network });
+    // Sui has migrated off the legacy JSON-RPC fullnode API; use gRPC.
+    // `customRpc`, when provided, must point at a gRPC(-Web) endpoint.
+    this.suiClient = createSuiGrpcClient(options.network, options.customRpc);
 
     if (this.chain === "solana") {
       // Parse the Solana keypair and set up the Solana RPC connection.
@@ -431,6 +431,35 @@ export class DipCoinPerpSDK {
     return this.walletAddress;
   }
 
+  /**
+   * Resolve the order `creator` as a perp-ts-library unified address display
+   * string. Since `creator` is part of the signed order payload, it must match
+   * exactly what the backend reconstructs (mirrors ts-frontend
+   * `resolveOrderCreator` / `resolveOrderCreatorAddress`):
+   *   - already-prefixed (`Sui:`/`Solana:`/`Ethereum:`) → passthrough
+   *   - vault sub-trader (`parentAddress`) → Sui-encoded (`Sui:0x…`)
+   *   - Solana wallet → `Solana:<base58>`
+   *   - Sui wallet / 1CT → `Sui:0x<lowercase>`
+   */
+  private getOrderCreator(url: string, parentAddress?: string): string {
+    if (parentAddress) {
+      return this.toUnifiedCreator(parentAddress, true);
+    }
+    return this.toUnifiedCreator(this.getActionAddress(url), false);
+  }
+
+  private toUnifiedCreator(address: string, isVault: boolean): string {
+    const trimmed = address.trim();
+    if (/^(Sui:|Solana:|Ethereum:)/i.test(trimmed)) {
+      return trimmed;
+    }
+    // Vault object ids are always Sui-encoded; otherwise honor the active chain.
+    if (!isVault && this.chain === "solana" && this.solanaAddress) {
+      return solanaUnifiedDisplay(this.solanaAddress);
+    }
+    return unifiedAddressDisplay(UnifiedAddressChainId.Sui, trimmed);
+  }
+
   /** Throw a descriptive error if the Solana keypair is missing. */
   private requireSolanaKeypair(): SolanaKeypair {
     if (this.chain !== "solana" || !this.solanaKeypair) {
@@ -447,6 +476,15 @@ export class DipCoinPerpSDK {
     return this.solanaConnection;
   }
 
+  /** Guard for Sui-only on-chain methods (signed via the local Sui keypair). */
+  private assertSuiOnly(method: string): void {
+    if (this.chain === "solana") {
+      throw new Error(
+        `${method}() is Sui-only; it signs with a Sui keypair. It is not yet supported for Solana wallets.`
+      );
+    }
+  }
+
   /**
    * Sign an action message (order / cancel) for the active chain. On Sui this
    * uses the provided action keypair (main wallet or 1CT sub-account); on
@@ -459,7 +497,12 @@ export class DipCoinPerpSDK {
     if (this.chain === "solana") {
       return buildSolanaApiSignature(messageBytes, this.requireSolanaKeypair());
     }
-    return signMessage(suiActionKeypair, messageBytes);
+    // Only 1CT sub-account signatures use the `KP_ED25519` ("1") flag; the
+    // primary wallet must use `UI_ED25519` ("2") or the backend rejects the
+    // order with "Invalid signature" (matches ts-frontend).
+    const isSubAccountKeypair =
+      !!this.oneClickTradingKeypair && suiActionKeypair === this.oneClickTradingKeypair;
+    return signMessage(suiActionKeypair, messageBytes, isSubAccountKeypair);
   }
 
   /** Build per-request override config to route a request through the 1CT JWT. */
@@ -650,7 +693,6 @@ export class DipCoinPerpSDK {
       // Resolve action signing context (main wallet or 1CT sub-account).
       const actionUrl = API_ENDPOINTS.PLACE_ORDER;
       const actionKeypair = this.getActionKeypair(actionUrl);
-      const actionAddress = this.getActionAddress(actionUrl);
       const requestOverride = this.buildOneCtRequestConfig(actionUrl);
 
       // For vault sub-trader flow: order's `creator` becomes the vault address
@@ -658,7 +700,9 @@ export class DipCoinPerpSDK {
       // `useAccounts.selectedAccount` as the creator). The signature still
       // comes from the wallet / 1CT keypair — backend resolves the trader
       // authorization from the vault's on-chain `trader` field.
-      const orderCreator = params.parentAddress ?? actionAddress;
+      // `creator` must be a unified address display string (e.g. `Sui:0x…`),
+      // since it is part of the signed order payload the backend reconstructs.
+      const orderCreator = this.getOrderCreator(actionUrl, params.parentAddress);
 
       // Build main order object
       // Note: market must be the PerpetualID (e.g., "0xc1b1cf3d774bcfcbd6d71158a4259f2d99fccbf64ffc34f32700f8a771587d99")
@@ -1150,8 +1194,8 @@ export class DipCoinPerpSDK {
       const expirationBN = new BigNumber(0);
       const saltBN = new BigNumber(+new Date());
       const slSaltBN = saltBN.plus(1);
-      // Chain-aware order creator (Solana => `Solana:<base58>`).
-      const orderCreator = this.getActionAddress(API_ENDPOINTS.PLAN_CLOSE_ORDER);
+      // Unified order creator (Sui => `Sui:0x…`, Solana => `Solana:<base58>`).
+      const orderCreator = this.getOrderCreator(API_ENDPOINTS.PLAN_CLOSE_ORDER);
       const planPayloadBase = {
         symbol,
         side,
@@ -2114,12 +2158,11 @@ export class DipCoinPerpSDK {
    * @param params Margin adjustment parameters
    */
   async addMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
-    const transaction = await this.buildMarginTransaction(params, "add");
-    if (transaction) {
-      return this.exchangeOnChain.executeTxBlock(transaction, this.keypair);
-    }
-    const fallbackPayload = this.buildMarginCallArgs(params, "add");
-    return this.exchangeOnChain.addMargin(fallbackPayload, this.keypair, undefined, {
+    this.assertSuiOnly("addMargin");
+    // perp-ts-library >=0.0.32 uses a signed-payload `add_margin_v4` entry; the
+    // high-level ExchangeOnChain method builds + signs the payload internally.
+    const payload = this.buildMarginCallArgs(params, "add");
+    return this.exchangeOnChain.addMargin(payload, this.keypair, undefined, {
       gasBudget: params.gasBudget,
     });
   }
@@ -2129,12 +2172,9 @@ export class DipCoinPerpSDK {
    * @param params Margin adjustment parameters
    */
   async removeMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
-    const transaction = await this.buildMarginTransaction(params, "remove");
-    if (transaction) {
-      return this.exchangeOnChain.executeTxBlock(transaction, this.keypair);
-    }
-    const fallbackPayload = this.buildMarginCallArgs(params, "remove");
-    return this.exchangeOnChain.removeMargin(fallbackPayload, this.keypair, undefined, {
+    this.assertSuiOnly("removeMargin");
+    const payload = this.buildMarginCallArgs(params, "remove");
+    return this.exchangeOnChain.removeMargin(payload, this.keypair, undefined, {
       gasBudget: params.gasBudget,
     });
   }
@@ -2213,48 +2253,6 @@ export class DipCoinPerpSDK {
     return protocolId;
   }
 
-  private async buildMarginTransaction(
-    params: MarginAdjustmentParams,
-    action: "add" | "remove"
-  ): Promise<Transaction | undefined> {
-    if (!this.transactionBuilder) {
-      return undefined;
-    }
-    const payload = this.buildMarginCallArgs(params, action);
-    const updatePriceTx = payload.market
-      ? await this.buildUpdatePriceTransaction(payload.market)
-      : undefined;
-    const baseTx = updatePriceTx || new Transaction();
-    if (action === "add") {
-      // NOTE: perp-ts-library >=0.0.32 tightened this builder to a
-      // SignedUserPayload-shaped arg; cast preserves the existing Sui flow.
-      return this.transactionBuilder.exchange_addMarginTx(payload as any, baseTx, params.gasBudget);
-    }
-    return this.transactionBuilder.exchange_removeMarginTx(
-      payload as any,
-      baseTx,
-      params.gasBudget
-    );
-  }
-
-  private async buildUpdatePriceTransaction(symbol: string): Promise<Transaction | undefined> {
-    if (!symbol) {
-      return undefined;
-    }
-    try {
-      const result = await this.getLatestSignedPriceFeed(symbol);
-      if (!result.status || !result.data) {
-        console.warn(`Failed to fetch signed price feed for ${symbol}:`, result.error);
-        return undefined;
-      }
-      const { payload, signature, publicKey } = result.data;
-      return this.transactionBuilder.buildSignedPriceFeedTx({ payload, signature, publicKey });
-    } catch (error) {
-      console.warn(`Failed to build price update transaction for ${symbol}:`, error);
-      return undefined;
-    }
-  }
-
   /**
    * Resolve perpId from deployment data
    */
@@ -2322,23 +2320,37 @@ export class DipCoinPerpSDK {
   //  Solana (CCTP + relayer) asset operations
   // =======================================================================
 
-  /** Resolve `{ depositBoxId, packageId }` from deployment config (with overrides). */
+  /**
+   * Resolve `{ depositBoxId, packageId }` from deployment config (with overrides).
+   *
+   * Mirrors ts-frontend's `DepositAndWithdrawModal`:
+   *   - depositBoxId = `objects.CctpDepositBox.id`
+   *   - packageId    = latest deployed package (`packages[packages.length - 1]`),
+   *     which is the package used to derive
+   *     `destinationCaller = keccak256("{packageId}::cctp::CctpReceiveAuth")`.
+   *
+   * The legacy `config.cctp.{depositBoxId,packageId}` fields are still honored
+   * for backward compatibility when present.
+   */
   private getCctpDeploymentInfo(overrides?: {
     cctpDepositBoxId?: string;
     cctpPackageId?: string;
   }): { depositBoxId: string; packageId: string } {
     const cctp = this.deploymentConfig?.cctp ?? {};
     const depositBoxId =
-      overrides?.cctpDepositBoxId ?? cctp.depositBoxId ?? this.deploymentConfig?.objects?.CctpDepositBox?.id;
-    const packageId = overrides?.cctpPackageId ?? cctp.packageId;
+      overrides?.cctpDepositBoxId ??
+      cctp.depositBoxId ??
+      this.deploymentConfig?.objects?.CctpDepositBox?.id;
+    const packageId =
+      overrides?.cctpPackageId ?? cctp.packageId ?? this.getDeploymentPackageId();
     if (!depositBoxId) {
       throw new Error(
-        "Missing CCTP deposit box id (config.cctp.depositBoxId). Pass `cctpDepositBoxId` explicitly."
+        "Missing CCTP deposit box id (config.objects.CctpDepositBox.id). Pass `cctpDepositBoxId` explicitly."
       );
     }
     if (!packageId) {
       throw new Error(
-        "Missing CCTP package id (config.cctp.packageId). Pass `cctpPackageId` explicitly."
+        "Missing CCTP package id (config.packages). Pass `cctpPackageId` explicitly."
       );
     }
     return { depositBoxId, packageId };
@@ -3611,7 +3623,12 @@ export class DipCoinPerpSDK {
   }
 
   /**
-   * Request vault share redemption. Prepends signed price feed on the same PTB (matches web app).
+   * Request vault share redemption.
+   *
+   * perp-ts-library >=0.0.32 turned this into a signed-payload entry: the
+   * high-level `ExchangeOnChain.requestWithdrawFromVault` builds and signs the
+   * payload internally (NAV/price is applied later at fill time, so no price
+   * feed is prepended here).
    *
    * Performs the same lock-period pre-check the web app does (mirrors
    * `WithdrawFromVaultLayer`): fetches `vaultConfig.lockPeriodMs` and the
@@ -3623,22 +3640,19 @@ export class DipCoinPerpSDK {
   async requestWithdrawFromVault(
     params: VaultWithdrawParams & { skipLockCheck?: boolean }
   ): Promise<SuiTransactionBlockResponse> {
+    this.assertSuiOnly("requestWithdrawFromVault");
     if (!params.skipLockCheck) {
       await this.assertVaultWithdrawUnlocked(params.vaultId);
     }
-    const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
-    const tx = new Transaction();
-    this.transactionBuilder.buildSignedPriceFeedTx(signedPriceFeed, tx);
-    this.transactionBuilder.vault_requestWithdrawTx(
+    return this.exchangeOnChain.requestWithdrawFromVault(
       {
         vaultID: params.vaultId,
         shares: formatNormalToWei(params.shares),
-      } as any,
-      tx,
-      params.gasBudget,
-      this.keypair.toSuiAddress()
+      },
+      this.keypair,
+      undefined,
+      { gasBudget: params.gasBudget }
     );
-    return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
   }
 
   /**
@@ -3831,8 +3845,8 @@ export class DipCoinPerpSDK {
     return this.exchangeOnChain;
   }
 
-  /** Direct access to the underlying Sui JSON-RPC client. */
-  get sui(): SuiJsonRpcClient {
+  /** Direct access to the underlying Sui gRPC client. */
+  get sui(): SuiGrpcCompatClient {
     return this.suiClient;
   }
 

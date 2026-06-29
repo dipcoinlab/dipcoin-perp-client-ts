@@ -83,15 +83,25 @@ export function fromExportedKeypair(
  * Sign a message using keypair
  * @param keypair Keypair to sign with
  * @param messageBytes Message bytes to sign
+ * @param isKeyPair Whether the signer is a 1CT sub-account keypair (flag
+ *   `KP_ED25519` / "1") rather than a primary wallet (flag `UI_ED25519` / "2").
+ *   The backend uses this flag to resolve how the signer maps to the order
+ *   `creator`, so a main-wallet order tagged as "1" is rejected as
+ *   "Invalid signature". Mirrors ts-frontend (`buildSignature(sig)` for the
+ *   main wallet, `buildSignature(sig, true)` for the sub-account).
  * @returns Signature string
  */
-export async function signMessage(keypair: Keypair, messageBytes: Uint8Array): Promise<string> {
+export async function signMessage(
+  keypair: Keypair,
+  messageBytes: Uint8Array,
+  isKeyPair = false
+): Promise<string> {
   const signatureResult = await keypair.signPersonalMessage(messageBytes);
   // signPersonalMessage returns an object with a signature field
   // The signature field is a serialized signature string
   const serializedSignature =
     typeof signatureResult === "string" ? signatureResult : signatureResult.signature;
-  return buildSignature(serializedSignature, true);
+  return buildSignature(serializedSignature, isKeyPair);
 }
 
 /**
@@ -120,7 +130,7 @@ export function buildSignature(signature: string, isKeyPair = false): string {
     throw new Error(`Unsupported signature scheme: ${signatureData.signatureScheme}`);
   }
 
-  return `${signatureHex}${flag}${publicKey}`;
+  return `${signatureHex}-${flag}-${publicKey}`;
 }
 
 /**

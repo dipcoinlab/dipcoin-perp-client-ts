@@ -866,7 +866,7 @@ async function main() {
     boolEnv("RUN_MARGIN_ADD"),
     boolEnv("RUN_MARGIN_REMOVE"),
     numberEnv("MARGIN_ADD_AMOUNT", 10),
-    numberEnv("MARGIN_REMOVE_AMOUNT", 5)
+    numberEnv("MARGIN_REMOVE_AMOUNT", 1)
   );
 
   await maybeRunVaultExample(sdk, boolEnv("RUN_VAULT_REST"));

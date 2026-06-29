@@ -8,6 +8,8 @@ import {
   TransactionBuilder,
   unifiedAddressDisplay,
   UnifiedAddressChainId,
+  signAddMarginPayload,
+  signRemoveMarginPayload,
 } from "@dipcoinlab/perp-ts-library";
 import type { SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc";
 import { Keypair } from "@mysten/sui/cryptography";
@@ -134,6 +136,12 @@ import {
   waitSolanaCctpWithdraw,
   type CctpNetwork,
 } from "../solana";
+
+/**
+ * Validity window for signed margin payloads (salt → expiration), matching
+ * `PAYLOAD_EXPIRATION_MS` in perp-ts-library / ts-frontend (30 minutes).
+ */
+const MARGIN_PAYLOAD_EXPIRATION_MS = 30 * 60 * 1000;
 
 /**
  * DipCoin Perpetual Trading SDK
@@ -2159,12 +2167,7 @@ export class DipCoinPerpSDK {
    */
   async addMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
     this.assertSuiOnly("addMargin");
-    // perp-ts-library >=0.0.32 uses a signed-payload `add_margin_v4` entry; the
-    // high-level ExchangeOnChain method builds + signs the payload internally.
-    const payload = this.buildMarginCallArgs(params, "add");
-    return this.exchangeOnChain.addMargin(payload, this.keypair, undefined, {
-      gasBudget: params.gasBudget,
-    });
+    return this.adjustMargin(params, "add");
   }
 
   /**
@@ -2173,10 +2176,94 @@ export class DipCoinPerpSDK {
    */
   async removeMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
     this.assertSuiOnly("removeMargin");
-    const payload = this.buildMarginCallArgs(params, "remove");
-    return this.exchangeOnChain.removeMargin(payload, this.keypair, undefined, {
-      gasBudget: params.gasBudget,
+    return this.adjustMargin(params, "remove");
+  }
+
+  /**
+   * Shared add/remove margin flow, mirroring ts-frontend `AdjustMarginModal`:
+   *
+   * 1. Sign an `AddMargin`/`RemoveMargin` payload with the wallet keypair where
+   *    `amount` is in **wei** and `user` is the unified address display string
+   *    (`Sui:0x…`, or the Sui-encoded vault id for sub-trader positions).
+   * 2. Prepend a fresh signed price feed (`update_price_feed`) onto the same PTB
+   *    so the `*_v4` entry can read the current oracle price.
+   * 3. Call the low-level `exchange_{add,remove}MarginTx` with `amount` as a
+   *    **normal** number (the builder scales it by 10^18 to match the signed
+   *    wei amount) and `sender` = the gas-paying main wallet.
+   * 4. Sign + execute with the main wallet keypair.
+   */
+  private async adjustMargin(
+    params: MarginAdjustmentParams,
+    action: "add" | "remove"
+  ): Promise<SuiTransactionBlockResponse> {
+    const { amount, account, market, perpID, gasBudget } = this.buildMarginCallArgs(params, action);
+    const marketSymbol = market;
+    if (!marketSymbol) {
+      throw new Error("market/symbol is required for margin adjustments");
+    }
+    const resolvedPerpId = perpID || this.exchangeOnChain.getPerpetualID(marketSymbol as any);
+    if (!resolvedPerpId) {
+      throw new Error(`Unable to resolve perpId for market ${marketSymbol}`);
+    }
+
+    const isVault = Boolean(params.parentAddress);
+    // payload `user` is the unified display; the tx `account` stays the raw
+    // address (the builder re-derives the unified tag from it on-chain).
+    const payloadUser = this.toUnifiedCreator(account, isVault);
+    const amountWei = formatNormalToWei(amount);
+    const salt = String(Date.now());
+    const expiration = String(Date.now() + MARGIN_PAYLOAD_EXPIRATION_MS);
+
+    const signFn = action === "add" ? signAddMarginPayload : signRemoveMarginPayload;
+    const signed = await signFn(this.keypair, {
+      market: resolvedPerpId,
+      user: payloadUser,
+      amount: amountWei,
+      salt,
+      expiration,
     });
+
+    // Prepend the signed price feed (best-effort, matching ts-frontend which
+    // treats it as optional when the backend feed is unavailable).
+    let baseTx: Transaction | undefined;
+    try {
+      const feed = await this.getLatestSignedPriceFeed(marketSymbol);
+      if (feed.status && feed.data?.payload && feed.data?.signature && feed.data?.publicKey) {
+        baseTx = this.transactionBuilder.buildSignedPriceFeedTx({
+          payload: feed.data.payload,
+          signature: feed.data.signature,
+          publicKey: feed.data.publicKey,
+        });
+      }
+    } catch (e) {
+      console.warn(`Failed to attach signed price feed for ${marketSymbol}:`, e);
+    }
+
+    const txArgs = {
+      amount,
+      market: marketSymbol,
+      account,
+      salt: signed.salt,
+      expiration: signed.expiration,
+      signature: signed.signature,
+      publicKey: signed.publicKey,
+    };
+    const tx =
+      action === "add"
+        ? this.transactionBuilder.exchange_addMarginTx(
+            txArgs,
+            baseTx,
+            gasBudget,
+            this.walletAddress
+          )
+        : this.transactionBuilder.exchange_removeMarginTx(
+            txArgs,
+            baseTx,
+            gasBudget,
+            this.walletAddress
+          );
+
+    return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
   }
 
   /**

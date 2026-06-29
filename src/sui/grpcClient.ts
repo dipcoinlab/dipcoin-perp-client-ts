@@ -464,6 +464,82 @@ function extractCoinType(objectType: string, fallback?: string): string {
   return match?.[1] ?? fallback ?? objectType;
 }
 
+/** Retry policy for transient gRPC transport failures. */
+const TRANSIENT_RETRY = { attempts: 3, baseDelayMs: 400 } as const;
+
+/**
+ * Detects transient transport-layer failures that are safe to retry.
+ *
+ * Public Sui gRPC fullnodes occasionally reset connections, surfacing as
+ * Node `fetch failed` / `ECONNRESET` / gRPC `UNAVAILABLE` errors. These are not
+ * deterministic on-chain failures, so a retry usually succeeds. We explicitly
+ * never retry `MoveAbort`, transaction-resolution, or `INVALID_ARGUMENT`
+ * errors, which are deterministic and would just fail again.
+ */
+function isTransientTransportError(error: unknown): boolean {
+  const parts: string[] = [];
+  let current: any = error;
+  for (let depth = 0; current && depth < 6; depth++) {
+    if (typeof current?.message === "string") parts.push(current.message);
+    if (typeof current?.code === "string") parts.push(current.code);
+    current = current?.cause;
+  }
+  const joined = parts.join(" | ").toLowerCase();
+
+  // Deterministic on-chain / request failures: never retry.
+  if (
+    joined.includes("moveabort") ||
+    joined.includes("resolution failed") ||
+    joined.includes("invalid_argument") ||
+    joined.includes("not_found")
+  ) {
+    return false;
+  }
+
+  return (
+    joined.includes("fetch failed") ||
+    joined.includes("econnreset") ||
+    joined.includes("socket hang up") ||
+    joined.includes("und_err") ||
+    joined.includes("terminated") ||
+    joined.includes("other side closed") ||
+    joined.includes("unavailable") ||
+    joined.includes("deadline_exceeded") ||
+    joined.includes("etimedout") ||
+    joined.includes("enotfound") ||
+    joined.includes("eai_again")
+  );
+}
+
+/**
+ * Runs `fn`, retrying with linear backoff on transient transport errors.
+ *
+ * Safe for both reads and transaction submission: the only failures retried
+ * occur before/around `SimulateTransaction`/transport, and re-submitting the
+ * identical signed transaction bytes is idempotent on Sui (same digest).
+ */
+async function withTransientRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= TRANSIENT_RETRY.attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= TRANSIENT_RETRY.attempts || !isTransientTransportError(error)) {
+        throw error;
+      }
+      const delay = TRANSIENT_RETRY.baseDelayMs * attempt;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[sui-grpc] transient error on ${label} (attempt ${attempt}/${TRANSIENT_RETRY.attempts}), retrying in ${delay}ms:`,
+        error instanceof Error ? error.message : error
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 /**
  * gRPC-backed Sui client that exposes legacy JSON-RPC-shaped method results so
  * existing call sites (and `@dipcoinlab/perp-ts-library`) keep working.
@@ -681,13 +757,15 @@ export class SuiGrpcCompatClient extends BaseClient {
     additionalSignatures?: string[];
     signal?: AbortSignal;
   }): Promise<SuiTransactionBlockResponse> {
-    const result = await this.grpc.signAndExecuteTransaction({
-      signer: input.signer,
-      transaction: input.transaction,
-      additionalSignatures: input.additionalSignatures,
-      include: transactionIncludeFromOptions(input.options),
-      signal: input.signal,
-    });
+    const result = await withTransientRetry("signAndExecuteTransaction", () =>
+      this.grpc.signAndExecuteTransaction({
+        signer: input.signer,
+        transaction: input.transaction,
+        additionalSignatures: input.additionalSignatures,
+        include: transactionIncludeFromOptions(input.options),
+        signal: input.signal,
+      })
+    );
     return mapTransactionResult(result);
   }
 
@@ -697,12 +775,14 @@ export class SuiGrpcCompatClient extends BaseClient {
     options?: TransactionResponseOptions;
     signal?: AbortSignal;
   }): Promise<SuiTransactionBlockResponse> {
-    const result = await this.grpc.executeTransaction({
-      transaction: input.transaction,
-      signatures: input.signatures,
-      include: transactionIncludeFromOptions(input.options),
-      signal: input.signal,
-    });
+    const result = await withTransientRetry("executeTransaction", () =>
+      this.grpc.executeTransaction({
+        transaction: input.transaction,
+        signatures: input.signatures,
+        include: transactionIncludeFromOptions(input.options),
+        signal: input.signal,
+      })
+    );
     return mapTransactionResult(result);
   }
 
@@ -731,18 +811,20 @@ export class SuiGrpcCompatClient extends BaseClient {
       typeof input.transactionBlock === "string"
         ? fromBase64(input.transactionBlock)
         : input.transactionBlock;
-    const result = await this.grpc.simulateTransaction({
-      transaction,
-      include: {
-        balanceChanges: true,
-        effects: true,
-        events: true,
-        objectTypes: true,
-        transaction: true,
-        commandResults: true,
-      },
-      signal: input.signal,
-    });
+    const result = await withTransientRetry("simulateTransaction", () =>
+      this.grpc.simulateTransaction({
+        transaction,
+        include: {
+          balanceChanges: true,
+          effects: true,
+          events: true,
+          objectTypes: true,
+          transaction: true,
+          commandResults: true,
+        },
+        signal: input.signal,
+      })
+    );
     const mapped = mapTransactionResult(result);
     return {
       ...mapped,

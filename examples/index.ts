@@ -595,16 +595,16 @@ async function maybeRunTpSlFlow(sdk: DipCoinPerpSDK, symbol: string, perpId: str
         tp: editTpPlanId
           ? {
               planId: editTpPlanId,
-              triggerPrice: "91000",
+              triggerPrice: "61000",
               orderType: OrderType.LIMIT,
-              orderPrice: "91000",
+              orderPrice: "62000",
               tpslType: "position",
             }
           : undefined,
         sl: editSlPlanId
           ? {
               planId: editSlPlanId,
-              triggerPrice: "85000",
+              triggerPrice: "58000",
               orderType: OrderType.MARKET,
               tpslType: "position",
             }
@@ -759,10 +759,32 @@ async function runSolanaDemo(privateKey: string, network: Network) {
     boolEnv("RUN_LIMIT_ORDER"),
     process.env.LIMIT_ORDER_QTY || "0.01",
     process.env.LIMIT_ORDER_LEVERAGE || "20",
-    process.env.LIMIT_ORDER_PRICE || "85000",
+    process.env.LIMIT_ORDER_PRICE || "58000",
     toOrderSide(process.env.LIMIT_ORDER_SIDE, OrderSide.BUY)
   );
   await maybeCancelFirstOrder(sdk, symbol, boolEnv("RUN_CANCEL_ORDER"));
+
+  // Margin add/remove. On Solana the wallet cannot pay Sui gas or build a PTB,
+  // so addMargin/removeMargin sign a payload with the Solana key and submit it
+  // to the relayer (`/api/perp-relayer/v1/relay`), which broadcasts on Sui.
+  await maybeRunMarginFlow(
+    sdk,
+    symbol,
+    boolEnv("RUN_MARGIN_ADD"),
+    boolEnv("RUN_MARGIN_REMOVE"),
+    numberEnv("MARGIN_ADD_AMOUNT", 10),
+    numberEnv("MARGIN_REMOVE_AMOUNT", 1)
+  );
+
+  // Vault REST + on-chain deposit / withdraw request. On Solana the on-chain
+  // deposit/withdraw are signed with the Solana key and dispatched via the
+  // relayer (the wallet cannot pay Sui gas / build a PTB).
+  await maybeRunVaultExample(sdk, boolEnv("RUN_VAULT_REST"));
+
+  // TP/SL place / edit / cancel. These are order-API operations signed with the
+  // Solana key (creator = `Solana:<base58>`), identical to Sui aside from the
+  // signature scheme — no relayer needed.
+  await maybeRunTpSlFlow(sdk, stringEnv("TPSL_SYMBOL", symbol), perpId);
 
   printDivider();
   console.log("🎉 Solana demo complete. Enable additional sections via env flags as needed.");

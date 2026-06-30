@@ -918,10 +918,16 @@ export class DipCoinPerpSDK {
 
       const actionUrl = API_ENDPOINTS.CANCEL_ORDER;
       const actionKeypair = this.getActionKeypair(actionUrl);
-      const actionAddress = this.getActionAddress(actionUrl);
       const requestOverride = this.buildOneCtRequestConfig(actionUrl);
 
-      const { symbol, orderHashes, parentAddress = actionAddress } = params;
+      // `parentAddress` identifies the *account* whose orders are cancelled, so
+      // it must be the normalized on-chain identity (0x-hex), NOT the order
+      // `creator` display string. On Solana that means the blake2b-derived
+      // unified address (`suiAddressFromChain`), mirroring ts-frontend's
+      // `useAccounts.selectedAccount`. Sending `Solana:<base58>` here makes the
+      // backend fail account resolution ("subAccount not exists"). With 1CT the
+      // signer is the sub-account keypair but the parent stays the main account.
+      const { symbol, orderHashes, parentAddress = this.onChainAddress } = params;
 
       if (!orderHashes || orderHashes.length === 0) {
         throw new Error("Order hashes are required");
@@ -2168,7 +2174,9 @@ export class DipCoinPerpSDK {
    * @param params Margin adjustment parameters
    */
   async addMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
-    this.assertSuiOnly("addMargin");
+    if (this.chain === "solana") {
+      return this.adjustMarginViaRelay(params, "add");
+    }
     return this.adjustMargin(params, "add");
   }
 
@@ -2177,8 +2185,101 @@ export class DipCoinPerpSDK {
    * @param params Margin adjustment parameters
    */
   async removeMargin(params: MarginAdjustmentParams): Promise<SuiTransactionBlockResponse> {
-    this.assertSuiOnly("removeMargin");
+    if (this.chain === "solana") {
+      return this.adjustMarginViaRelay(params, "remove");
+    }
     return this.adjustMargin(params, "remove");
+  }
+
+  /**
+   * Solana margin adjustment via the relayer (mirrors the non-Sui branch of
+   * ts-frontend `AdjustMarginModal`).
+   *
+   * Solana wallets cannot pay Sui gas / build a PTB, so we sign a canonical
+   * `Payload.add_margin` / `Payload.remove_margin` string with the Solana
+   * keypair (`hex(sig)+"5"` + base64 pubkey) and POST it to
+   * `/api/perp-relayer/v1/relay`; the relayer reconstructs and broadcasts the
+   * PTB on Sui. The signed `user` and the relay `params.user` are the unified
+   * display string (`Solana:<base58>`) so the backend reconstructs the exact
+   * message that was signed. Returns `{ digest }` from the relay response.
+   */
+  private async adjustMarginViaRelay(
+    params: MarginAdjustmentParams,
+    action: "add" | "remove"
+  ): Promise<SuiTransactionBlockResponse> {
+    const keypair = this.requireSolanaKeypair();
+    const solanaAddress = this.solanaAddress as string;
+
+    const { amount, market, perpID } = this.buildMarginCallArgs(params, action);
+    const marketSymbol = market;
+    if (!marketSymbol) {
+      throw new Error("market/symbol is required for margin adjustments");
+    }
+    const resolvedPerpId = perpID || this.exchangeOnChain.getPerpetualID(marketSymbol as any);
+    if (!resolvedPerpId) {
+      throw new Error(`Unable to resolve perpId for market ${marketSymbol}`);
+    }
+
+    // The relay request carries the onboarding JWT.
+    const authResult = await this.authenticate();
+    if (!authResult.status) {
+      throw new Error(authResult.error || "Authentication failed");
+    }
+
+    const amountWei = formatNormalToWei(amount);
+    const salt = Date.now().toString();
+    const expiration = (Date.now() + MARGIN_PAYLOAD_EXPIRATION_MS).toString();
+    const user = solanaUnifiedDisplay(solanaAddress);
+
+    const payloadParams = {
+      market: resolvedPerpId,
+      user,
+      amount: amountWei,
+      salt,
+      expiration,
+    };
+    const payloadStr =
+      action === "add" ? Payload.add_margin(payloadParams) : Payload.remove_margin(payloadParams);
+    const signed = signSolanaPayload(payloadStr, keypair);
+
+    // Best-effort signed price feed; the relayer prepends the price update PTB.
+    let priceFeed: { payload: string; signature: string; publicKey: string } | undefined;
+    try {
+      const feed = await this.getLatestSignedPriceFeed(marketSymbol);
+      if (feed.status && feed.data?.payload && feed.data?.signature && feed.data?.publicKey) {
+        priceFeed = {
+          payload: feed.data.payload,
+          signature: feed.data.signature,
+          publicKey: feed.data.publicKey,
+        };
+      }
+    } catch (e) {
+      console.warn(`Failed to attach signed price feed for ${marketSymbol}:`, e);
+    }
+
+    const relayRes = await postRelay(
+      this.httpClient,
+      {
+        action: action === "add" ? "AddMargin" : "RemoveMargin",
+        user: toRelayUser("solana", solanaAddress),
+        params: {
+          amount: amountWei,
+          market: resolvedPerpId,
+          symbol: marketSymbol,
+          account: solanaAddress,
+          user,
+          salt,
+          expiration,
+          ...(priceFeed ? { priceFeed } : {}),
+        },
+        signature: signed.signature,
+        publicKey: signed.publicKey,
+      },
+      { authToken: this.jwtToken }
+    );
+
+    const digest = extractRelayTxDigest(relayRes);
+    return { digest } as unknown as SuiTransactionBlockResponse;
   }
 
   /**
@@ -3695,7 +3796,9 @@ export class DipCoinPerpSDK {
    * value falls below `min_deposit_amount`.
    */
   async depositToVault(params: VaultDepositParams): Promise<SuiTransactionBlockResponse> {
-    this.assertSuiOnly("depositToVault");
+    if (this.chain === "solana") {
+      return this.depositToVaultViaRelay(params);
+    }
     const amountWei = formatNormalToWei(params.amount, DECIMALS.VAULT_CONFIG);
     // payload `account`/`user` is the chain-agnostic display string (`Sui:0x…`);
     // tx-level `sender` stays the raw Sui address (the gas payer / broadcaster).
@@ -3752,9 +3855,11 @@ export class DipCoinPerpSDK {
   async requestWithdrawFromVault(
     params: VaultWithdrawParams & { skipLockCheck?: boolean }
   ): Promise<SuiTransactionBlockResponse> {
-    this.assertSuiOnly("requestWithdrawFromVault");
     if (!params.skipLockCheck) {
       await this.assertVaultWithdrawUnlocked(params.vaultId);
+    }
+    if (this.chain === "solana") {
+      return this.requestWithdrawFromVaultViaRelay(params);
     }
 
     const sharesWei = formatNormalToWei(params.shares);
@@ -3816,6 +3921,133 @@ export class DipCoinPerpSDK {
       console.warn(`Failed to attach signed price feed for ${label}:`, e);
     }
     return undefined;
+  }
+
+  /**
+   * Best-effort raw signed price feed (`{ payload, signature, publicKey }`) for
+   * relay params. The relayer rebuilds the price-update PTB on Sui.
+   */
+  private async fetchSignedPriceFeedForRelay(): Promise<
+    { payload: string; signature: string; publicKey: string } | undefined
+  > {
+    try {
+      const feed = (await this.getLatestSignedPriceFeed()).data;
+      if (feed?.payload && feed?.signature && feed?.publicKey) {
+        return { payload: feed.payload, signature: feed.signature, publicKey: feed.publicKey };
+      }
+    } catch (e) {
+      console.warn("Failed to fetch signed price feed for vault relay:", e);
+    }
+    return undefined;
+  }
+
+  /**
+   * Solana vault deposit via the relayer (mirrors the non-Sui branch of
+   * `useVault.depositToVault`). Signs a canonical `Payload.vault_deposit` with
+   * the Solana key and POSTs it to `/api/perp-relayer/v1/relay`; the relayer
+   * rebuilds and broadcasts the PTB on Sui. Returns `{ digest }`.
+   */
+  private async depositToVaultViaRelay(
+    params: VaultDepositParams
+  ): Promise<SuiTransactionBlockResponse> {
+    const keypair = this.requireSolanaKeypair();
+    const solanaAddress = this.solanaAddress as string;
+
+    const authResult = await this.authenticate();
+    if (!authResult.status) {
+      throw new Error(authResult.error || "Authentication failed");
+    }
+
+    const amountWei = formatNormalToWei(params.amount, DECIMALS.VAULT_CONFIG);
+    const salt = String(Date.now());
+    const expiration = String(Date.now() + MARGIN_PAYLOAD_EXPIRATION_MS);
+    const user = solanaUnifiedDisplay(solanaAddress);
+
+    const payloadStr = Payload.vault_deposit({
+      vault: params.vaultId,
+      user,
+      amount: amountWei,
+      salt,
+      expiration,
+    });
+    const signed = signSolanaPayload(payloadStr, keypair);
+    const priceFeed = await this.fetchSignedPriceFeedForRelay();
+
+    const relayRes = await postRelay(
+      this.httpClient,
+      {
+        action: "VaultDeposit",
+        user: toRelayUser("solana", solanaAddress),
+        params: {
+          vaultId: params.vaultId,
+          amount: amountWei,
+          account: user,
+          salt,
+          expiration,
+          ...(priceFeed ? { priceFeed } : {}),
+        },
+        signature: signed.signature,
+        publicKey: signed.publicKey,
+      },
+      { authToken: this.jwtToken }
+    );
+
+    const digest = extractRelayTxDigest(relayRes);
+    return { digest } as unknown as SuiTransactionBlockResponse;
+  }
+
+  /**
+   * Solana vault withdrawal request via the relayer (mirrors the non-Sui branch
+   * of `useVault.requestWithdrawFromVault`). The signed payload `amount` is the
+   * redeemed shares in wei; relay params expose it as `shares`.
+   */
+  private async requestWithdrawFromVaultViaRelay(
+    params: VaultWithdrawParams & { skipLockCheck?: boolean }
+  ): Promise<SuiTransactionBlockResponse> {
+    const keypair = this.requireSolanaKeypair();
+    const solanaAddress = this.solanaAddress as string;
+
+    const authResult = await this.authenticate();
+    if (!authResult.status) {
+      throw new Error(authResult.error || "Authentication failed");
+    }
+
+    const sharesWei = formatNormalToWei(params.shares);
+    const salt = String(Date.now());
+    const expiration = String(Date.now() + MARGIN_PAYLOAD_EXPIRATION_MS);
+    const user = solanaUnifiedDisplay(solanaAddress);
+
+    const payloadStr = Payload.vault_request_withdraw({
+      vault: params.vaultId,
+      user,
+      amount: sharesWei,
+      salt,
+      expiration,
+    });
+    const signed = signSolanaPayload(payloadStr, keypair);
+    const priceFeed = await this.fetchSignedPriceFeedForRelay();
+
+    const relayRes = await postRelay(
+      this.httpClient,
+      {
+        action: "VaultRequestWithdraw",
+        user: toRelayUser("solana", solanaAddress),
+        params: {
+          vaultId: params.vaultId,
+          shares: sharesWei,
+          account: user,
+          salt,
+          expiration,
+          ...(priceFeed ? { priceFeed } : {}),
+        },
+        signature: signed.signature,
+        publicKey: signed.publicKey,
+      },
+      { authToken: this.jwtToken }
+    );
+
+    const digest = extractRelayTxDigest(relayRes);
+    return { digest } as unknown as SuiTransactionBlockResponse;
   }
 
   /**

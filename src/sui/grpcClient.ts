@@ -79,7 +79,16 @@ export interface SuiGrpcCompatClientOptions {
   network: SuiNetwork;
   url?: string;
   baseUrl?: string;
+  /**
+   * Per-request gRPC-Web timeout in ms. Heavy `SimulateTransaction` calls
+   * (e.g. vault `update_share_price` NAV computation) can exceed the default,
+   * surfacing as `fetch failed`. Defaults to {@link DEFAULT_GRPC_TIMEOUT_MS}.
+   */
+  timeout?: number;
 }
+
+/** Default gRPC-Web per-request timeout (ms). */
+export const DEFAULT_GRPC_TIMEOUT_MS = 120_000;
 
 function normalizeNetwork(network: SuiNetwork): SuiClientTypes.Network {
   return (network === "local" ? "localnet" : network) as SuiClientTypes.Network;
@@ -464,8 +473,14 @@ function extractCoinType(objectType: string, fallback?: string): string {
   return match?.[1] ?? fallback ?? objectType;
 }
 
-/** Retry policy for transient gRPC transport failures. */
-const TRANSIENT_RETRY = { attempts: 3, baseDelayMs: 400 } as const;
+/**
+ * Retry policy for transient gRPC transport failures.
+ *
+ * Heavy `SimulateTransaction` requests (large vault PTBs ~7KB) are reset by
+ * public testnet nodes fairly often, so we retry generously. Each transient
+ * failure typically aborts in ~10s, so the total worst-case wait stays bounded.
+ */
+const TRANSIENT_RETRY = { attempts: 6, baseDelayMs: 400 } as const;
 
 /**
  * Detects transient transport-layer failures that are safe to retry.
@@ -558,6 +573,7 @@ export class SuiGrpcCompatClient extends BaseClient {
     this.grpc = new SuiGrpcClient({
       network,
       baseUrl,
+      timeout: options.timeout ?? DEFAULT_GRPC_TIMEOUT_MS,
     });
     this.core = this.grpc.core;
   }
@@ -855,11 +871,13 @@ export function getSuiGrpcBaseUrl(network: SuiNetwork): string {
  */
 export function createSuiGrpcClient(
   network: SuiNetwork,
-  baseUrl?: string
+  baseUrl?: string,
+  timeout?: number
 ): SuiGrpcCompatClient {
   return new SuiGrpcCompatClient({
     network,
     baseUrl: baseUrl || getSuiGrpcBaseUrl(network),
+    timeout,
   });
 }
 

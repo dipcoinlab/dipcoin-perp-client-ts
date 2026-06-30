@@ -10,6 +10,8 @@ import {
   UnifiedAddressChainId,
   signAddMarginPayload,
   signRemoveMarginPayload,
+  signVaultDepositPayload,
+  signVaultRequestWithdrawPayload,
 } from "@dipcoinlab/perp-ts-library";
 import type { SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc";
 import { Keypair } from "@mysten/sui/cryptography";
@@ -3693,29 +3695,52 @@ export class DipCoinPerpSDK {
    * value falls below `min_deposit_amount`.
    */
   async depositToVault(params: VaultDepositParams): Promise<SuiTransactionBlockResponse> {
-    const signedPriceFeed = await this.ensureSignedPriceFeed(params.signedPriceFeed);
+    this.assertSuiOnly("depositToVault");
     const amountWei = formatNormalToWei(params.amount, DECIMALS.VAULT_CONFIG);
-    console.log(
-      `[SDK depositToVault] vault=${params.vaultId} amount=${params.amount} -> u128 wei=${amountWei}`
-    );
-    return this.exchangeOnChain.depositToVault(
+    // payload `account`/`user` is the chain-agnostic display string (`Sui:0x…`);
+    // tx-level `sender` stays the raw Sui address (the gas payer / broadcaster).
+    const account = this.walletAddress;
+    const payloadUser = this.toUnifiedCreator(account, false);
+    const salt = String(Date.now());
+    const expiration = String(Date.now() + MARGIN_PAYLOAD_EXPIRATION_MS);
+
+    // v9: `vault::deposit` verifies a signed `Payload.vault_deposit` on-chain.
+    const signed = await signVaultDepositPayload(this.keypair, {
+      vault: params.vaultId,
+      user: payloadUser,
+      amount: amountWei,
+      salt,
+      expiration,
+    });
+
+    const baseTx = await this.buildVaultPriceFeedTx(params.signedPriceFeed, "vault deposit");
+
+    const tx = this.transactionBuilder.buildDepositVaultTx(
       {
         vaultID: params.vaultId,
         amount: amountWei,
-        signedPriceFeed,
-        gasBudget: params.gasBudget,
+        account: payloadUser,
+        salt: signed.salt,
+        expiration: signed.expiration,
+        signature: signed.signature,
+        publicKey: signed.publicKey,
       } as any,
-      this.keypair
+      baseTx,
+      params.gasBudget,
+      this.walletAddress
     );
+
+    return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
   }
 
   /**
    * Request vault share redemption.
    *
-   * perp-ts-library >=0.0.32 turned this into a signed-payload entry: the
-   * high-level `ExchangeOnChain.requestWithdrawFromVault` builds and signs the
-   * payload internally (NAV/price is applied later at fill time, so no price
-   * feed is prepended here).
+   * v9 flow (mirrors `useVault.requestWithdrawFromVault`): sign the
+   * `Payload.vault_request_withdraw` payload (payload `amount` = redeemed
+   * shares in wei), prepend a fresh signed price feed for the on-chain NAV
+   * snapshot, then call the low-level `vault_requestWithdrawTx` with the raw
+   * Sui address as the gas-paying `sender`.
    *
    * Performs the same lock-period pre-check the web app does (mirrors
    * `WithdrawFromVaultLayer`): fetches `vaultConfig.lockPeriodMs` and the
@@ -3731,15 +3756,66 @@ export class DipCoinPerpSDK {
     if (!params.skipLockCheck) {
       await this.assertVaultWithdrawUnlocked(params.vaultId);
     }
-    return this.exchangeOnChain.requestWithdrawFromVault(
+
+    const sharesWei = formatNormalToWei(params.shares);
+    const account = this.walletAddress;
+    const payloadUser = this.toUnifiedCreator(account, false);
+    const salt = String(Date.now());
+    const expiration = String(Date.now() + MARGIN_PAYLOAD_EXPIRATION_MS);
+
+    const signed = await signVaultRequestWithdrawPayload(this.keypair, {
+      vault: params.vaultId,
+      user: payloadUser,
+      amount: sharesWei,
+      salt,
+      expiration,
+    });
+
+    const baseTx = await this.buildVaultPriceFeedTx(undefined, "vault request withdraw");
+
+    const tx = this.transactionBuilder.vault_requestWithdrawTx(
       {
         vaultID: params.vaultId,
-        shares: formatNormalToWei(params.shares),
-      },
-      this.keypair,
-      undefined,
-      { gasBudget: params.gasBudget }
+        shares: sharesWei,
+        account: payloadUser,
+        salt: signed.salt,
+        expiration: signed.expiration,
+        signature: signed.signature,
+        publicKey: signed.publicKey,
+      } as any,
+      baseTx,
+      params.gasBudget,
+      this.walletAddress
     );
+
+    return this.exchangeOnChain.signAndExecuteTx(tx, this.keypair);
+  }
+
+  /**
+   * Best-effort signed price-feed prepend for vault PTBs. Returns a
+   * `buildSignedPriceFeedTx` transaction when a feed is available (matching
+   * `useVault`, which treats the feed as optional), else `undefined`.
+   */
+  private async buildVaultPriceFeedTx(
+    provided: LatestPrice | undefined,
+    label: string
+  ): Promise<Transaction | undefined> {
+    try {
+      const feed =
+        provided?.payload && provided?.signature && provided?.publicKey
+          ? provided
+          : (await this.getLatestSignedPriceFeed()).data;
+      if (feed?.payload && feed?.signature && feed?.publicKey) {
+        return this.transactionBuilder.buildSignedPriceFeedTx({
+          payload: feed.payload,
+          signature: feed.signature,
+          publicKey: feed.publicKey,
+        });
+      }
+    } catch (e) {
+      console.warn(`Failed to attach signed price feed for ${label}:`, e);
+    }
+    return undefined;
   }
 
   /**

@@ -534,13 +534,13 @@ async function maybeRunTpSlFlow(sdk: DipCoinPerpSDK, symbol: string, perpId: str
         leverage: "5",
         quantity: "0.01",
         tp: {
-          triggerPrice: "89000",
+          triggerPrice: "61000",
           orderType: OrderType.LIMIT,
-          orderPrice: "90000",
+          orderPrice: "62000",
           tpslType: "position",
         },
         sl: {
-          triggerPrice: "85000",
+          triggerPrice: "58000",
           orderType: OrderType.MARKET,
           tpslType: "position",
         },

@@ -35,8 +35,8 @@ export type RelayAction =
   | "VaultSetAutoCloseOnWithdraw"
   | "VaultClose";
 
-/** 0 = Sui, 1 = EVM, 2 = Solana (aligns with UnifiedAddressChainId). */
-export type RelayChainId = 0 | 1 | 2;
+/** Protocol chain id: Sui 0, Ethereum 1, Solana 2, Arbitrum 3, Optimism 4, Base 5, Polygon 6. */
+export type RelayChainId = number;
 
 export interface RelayUser {
   chainId: RelayChainId;

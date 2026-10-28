@@ -7,6 +7,7 @@ export * from "./associatedToken";
 export * from "./signer";
 export * from "./anchorWallet";
 export * from "./cctpDeposit";
+export * from "./cctpQuote";
 export * from "./relay";
 export * from "./cctpStatus";
 export * from "./balance";

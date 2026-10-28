@@ -38,6 +38,9 @@ By default, only **read-only** operations execute. Every trading or on-chain act
 | `RUN_MARGIN_ADD=1` / `RUN_MARGIN_REMOVE=1` | Add or remove `MARGIN_AMOUNT` isolated margin | On-chain |
 | `RUN_TPSL_DEMO=1` | Place TP/SL plans (uses `TPSL_*` vars) | Requires open position or overrides |
 | `RUN_TPSL_EDIT=1` | Edit plans referenced by `TPSL_EDIT_TP_PLAN_ID` / `TPSL_EDIT_SL_PLAN_ID` | Requires plan IDs |
+| `CHAIN=solana` | Sign with a Solana key (`SOLANA_PRIVATE_KEY`) | CCTP V2 deposit / quoted withdraw |
+| `RUN_SOLANA_DEPOSIT=1` | CCTP V2 `depositForBurn` of `SOLANA_DEPOSIT_AMOUNT` USDC | Quote + fee-payer from the relayer |
+| `RUN_SOLANA_WITHDRAW=1` | Relayer withdraw of `SOLANA_WITHDRAW_AMOUNT` USDC | Uses `/cctp/withdraw/quote` |
 
 All historical environment variables (e.g., `TPSL_SYMBOL`, `MARGIN_SYMBOL`, `POSITION_ID`) keep the same semantics so existing tooling remains compatible.
 

@@ -77,7 +77,7 @@ All on-chain or order-creating steps are opt-in. Enable only the pieces you wish
 
 Additional tuning variables such as `DEPOSIT_AMOUNT`, `MARKET_ORDER_QTY`, `LIMIT_ORDER_SIDE`, `MARGIN_SYMBOL`, `TPSL_SYMBOL`, etc. mirror the names from the previous standalone scripts to remain backwards compatible.
 
-> Need a quick way to only inspect or update preferred leverage? Run `npm run example:leverage` (see `USAGE.md` for flags such as `SET_LEVERAGE`, `LEVERAGE_TARGET`, `LEVERAGE_SYMBOL`).
+> Need a quick way to only inspect or update preferred leverage? See [USAGE.md](./USAGE.md).
 
 ### Script Flow Details
 
@@ -212,21 +212,44 @@ Authentication and trading (`placeOrder` / `cancelOrder` / TP-SL) work the same
 as Sui — order payloads are signed with the Solana Ed25519 key and the
 `Solana:<base58>` unified creator address.
 
-Because Solana wallets cannot pay Sui gas, **assets move via Circle CCTP and the
+Because Solana wallets cannot pay Sui gas, **assets move via Circle CCTP V2 and the
 DipCoin relayer** (instead of `depositToBank` / `withdrawFromBank`, which are
-Sui-only):
+Sui-only).
+
+Deposit calls TokenMessengerMinterV2 `depositForBurn`. The SDK loads a deposit
+quote (`/cctp/deposit/quote`) for `mintRecipient`, `destinationCaller`, `maxFee`
+and `minFinalityThreshold`, and the Solana fee-payer route for the
+MessageTransmitter program. Do not pass the old core `CctpDepositBox` or compute
+`destinationCaller` locally.
+
+Withdraw requests `/cctp/withdraw/quote`, signs `Payload.withdrawal_solana` for
+the quoted bank and token account, and sends `quoteId` only in the relay body.
 
 ```typescript
-// Bridge USDC from Solana into the Sui Bank via CCTP (waits for the Sui receive).
-const dep = await sdk.depositToBankFromSolana({ amount: 10 });
-console.log(dep.solanaTxHash, dep.suiTxHash);
+// Bridge USDC from Solana into the Sui Bank (CCTP V2, waits for the Sui receive).
+const dep = await sdk.depositToBankFromSolana({ amount: 10, transferMode: "STANDARD" });
+console.log(dep.solanaTxHash, dep.suiTxHash, dep.estimatedReceive);
 
 // Withdraw USDC from the Sui Bank back to the Solana wallet via the relayer.
 const wd = await sdk.withdrawFromBankToSolana({ amount: 5 });
-console.log(wd.suiTxHash);
+console.log(wd.suiTxHash, wd.transactionFee, wd.estimatedReceive);
 
 // Balances: { sui: <SOL>, usdc: <Solana USDC>, bank: <Sui Bank USDC> }
 const balances = await sdk.getChainBalances();
+```
+
+EVM uses the same quote. Supported chains are Ethereum, Arbitrum, OP, Base, and Polygon.
+One address is a different Bank account on each chain. Polygon has no Fast transfer.
+EVM withdrawals sign `Payload.withdrawal` (no token account).
+
+```typescript
+const evm = initDipCoinPerpSDK(process.env.EVM_PRIVATE_KEY!, {
+  chain: "evm",
+  evmChain: "base",
+  network: "testnet",
+});
+await evm.depositToBankFromEvm({ amount: 10 });
+await evm.withdrawFromBankToEvm({ amount: 5 });
 ```
 
 ## Core Features

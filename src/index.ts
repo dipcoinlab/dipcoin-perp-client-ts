@@ -10,6 +10,7 @@ export * from "./types";
 export * from "./utils";
 export * from "./constants";
 export * from "./solana";
+export * from "./evm";
 export {
   SuiGrpcCompatClient,
   createSuiGrpcClient,

@@ -21,6 +21,8 @@ export interface CctpStatusPollOptions {
   timeoutMs?: number;
   /** Return truthy to abort the polling loop early. */
   shouldAbort?: () => boolean;
+  /** CCTP source chain id. Solana is 2. */
+  sourceChainId?: number;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -64,19 +66,66 @@ async function pollStatus(
   throw new Error("Timed out waiting for CCTP transfer to complete.");
 }
 
-/** Wait for a Solana deposit to be credited on Sui; resolves with the Sui digest. */
+/**
+ * Register the burn, then poll `/cctp/deposit/status` until Sui credits the Bank.
+ * `success: false` while the message is in flight is not a failure.
+ */
 export async function waitSolanaCctpDeposit(
   httpClient: HttpClient,
   solanaTxHash: string,
   options?: CctpStatusPollOptions
 ): Promise<string> {
-  return pollStatus(
-    httpClient,
-    API_ENDPOINTS.CCTP_DEPOSIT_STATUS,
-    solanaTxHash,
-    (data) => data?.suiReceiveTxHash ?? data?.suiTxHash ?? data?.digest ?? data?.txHash,
-    options
-  );
+  const sourceChainId = options?.sourceChainId ?? 2;
+  const interval = options?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const timeout = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadline = Date.now() + timeout;
+
+  await httpClient
+    .post(API_ENDPOINTS.CCTP_DEPOSIT_SUBMIT, { sourceChainId, txHash: solanaTxHash })
+    .catch(() => undefined);
+
+  while (Date.now() < deadline) {
+    if (options?.shouldAbort?.()) {
+      throw new Error("CCTP status polling aborted.");
+    }
+    const resp: any = await httpClient.get(API_ENDPOINTS.CCTP_DEPOSIT_STATUS, {
+      params: { sourceChainId, txHash: solanaTxHash },
+    });
+    const data = resp?.data ?? resp ?? {};
+    if (data.failed === true) {
+      throw new Error(resp?.message || data.message || "Cross-chain deposit failed");
+    }
+    if (data.success === true) {
+      const suiTxHash = data.suiReceiveTxHash ?? data.suiTxHash;
+      if (!suiTxHash) throw new Error("Missing Sui deposit txHash");
+      return String(suiTxHash);
+    }
+    await sleep(interval);
+  }
+  throw new Error("Timed out waiting for CCTP transfer to complete.");
+}
+
+/** Wait for an EVM withdraw to land on the destination chain. */
+export async function waitEvmCctpWithdraw(
+  httpClient: HttpClient,
+  suiTxHash: string,
+  options?: CctpStatusPollOptions
+): Promise<string> {
+  const interval = options?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const timeout = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (options?.shouldAbort?.()) throw new Error("CCTP status polling aborted.");
+    const resp: any = await httpClient.get(API_ENDPOINTS.CCTP_WITHDRAW_STATUS_EVM, {
+      params: { txHash: suiTxHash },
+    });
+    const data = resp?.data ?? {};
+    if (data.success === true) {
+      return String(data.destinationTxHash ?? data.txHash ?? "");
+    }
+    await sleep(interval);
+  }
+  throw new Error("Timed out waiting for CCTP transfer to complete.");
 }
 
 /** Wait for a Sui withdraw to be minted on Solana; resolves with the Solana tx hash. */

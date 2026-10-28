@@ -23,5 +23,7 @@ export function initSDKOptions(
     customRpc: options.customRpc,
     chain: options.chain ?? "sui",
     solanaRpcUrl: options.solanaRpcUrl,
+    evmChain: options.evmChain,
+    evmRpcUrl: options.evmRpcUrl,
   };
 }

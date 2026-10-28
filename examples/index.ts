@@ -674,6 +674,11 @@ async function maybeSolanaDeposit(sdk: DipCoinPerpSDK, enabled: boolean, amount:
     console.log(`Bridging ${amount} USDC from Solana to the Sui Bank...`);
     const res = await sdk.depositToBankFromSolana({ amount, waitForSui: true });
     console.log("✅ Solana burn tx:", res.solanaTxHash);
+    if (res.transferMode) {
+      console.log(
+        `   mode=${res.transferMode} fee=${res.transactionFee ?? "0"} estimatedReceive=${res.estimatedReceive ?? ""}`
+      );
+    }
     if (res.suiTxHash) {
       console.log("✅ Sui receive digest:", res.suiTxHash);
     }
@@ -693,6 +698,9 @@ async function maybeSolanaWithdraw(sdk: DipCoinPerpSDK, enabled: boolean, amount
     console.log(`Withdrawing ${amount} USDC from the Sui Bank to Solana...`);
     const res = await sdk.withdrawFromBankToSolana({ amount, waitForSolana: false });
     console.log("✅ Relayer Sui tx digest:", res.suiTxHash);
+    if (res.estimatedReceive) {
+      console.log(`   fee=${res.transactionFee ?? "0"} estimatedReceive=${res.estimatedReceive}`);
+    }
     if (res.solanaTxHash) {
       console.log("✅ Solana mint tx:", res.solanaTxHash);
     }

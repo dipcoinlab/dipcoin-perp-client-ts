@@ -325,10 +325,10 @@
   dependencies:
     "@jridgewell/trace-mapping" "0.3.9"
 
-"@dipcoinlab/perp-ts-library@^0.0.32":
-  version "0.0.32"
-  resolved "https://registry.npmjs.org/@dipcoinlab/perp-ts-library/-/perp-ts-library-0.0.32.tgz#a178928fc39ab198809201d81428d2a63af0b606"
-  integrity sha512-6xsHdPW23THqn1yH5TdqrgXoQktctugf1amthYeM81JS6xBkm8WuOVTfpxcxjXp7uD7C3m74DoUkEkYHU+dKLA==
+"@dipcoinlab/perp-ts-library@^0.0.37":
+  version "0.0.37"
+  resolved "https://registry.npmjs.org/@dipcoinlab/perp-ts-library/-/perp-ts-library-0.0.37.tgz#b545790ad89748f4f9a5593e828b5c687f86e681"
+  integrity sha512-kHraRe8SaAZWa3PJ6JgCNc53bWUYPKYxs2nvpu9rcj9++5elnLNbDj/00dYuUkhUEMk1Y89FYNWpnt76x9cdHA==
   dependencies:
     "@coral-xyz/anchor" "^0.32.1"
     "@mysten/sui" "^2.12.0"

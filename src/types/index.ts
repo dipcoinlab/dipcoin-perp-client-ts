@@ -4,12 +4,13 @@
 /**
  * SDK Configuration Interface
  */
+import type { EvmChainName } from "../evm/chains";
+
 /**
  * Chain the SDK keypair belongs to. Defaults to `"sui"` for backward
- * compatibility. When `"solana"`, the private key is parsed as a Solana
- * keypair and asset / signing flows route through CCTP + the relayer.
+ * compatibility. `"solana"` and `"evm"` route deposits and withdrawals through CCTP V2.
  */
-export type ChainKind = "sui" | "solana";
+export type ChainKind = "sui" | "solana" | "evm";
 
 export interface DipCoinPerpSDKOptions {
   /** API base URL for perp trading */
@@ -25,6 +26,12 @@ export interface DipCoinPerpSDKOptions {
    * Defaults to a public node per network.
    */
   solanaRpcUrl?: string;
+  /**
+   * Required when `chain === "evm"`. Same address on each chain is a separate Bank account.
+   */
+  evmChain?: EvmChainName;
+  /** Optional RPC override for `evmChain`. */
+  evmRpcUrl?: string;
 }
 
 /**
@@ -803,10 +810,15 @@ export interface ChainBalances {
   bank: string;
 }
 
-/** Parameters for a Solana CCTP deposit into the DipCoin Sui Bank. */
+/** Parameters for a Solana CCTP V2 deposit into the DipCoin Sui Bank. */
 export interface SolanaDepositParams {
   /** USDC amount in standard units (e.g. 10 = 10 USDC). */
   amount: number | string;
+  /**
+   * Circle transfer speed. Standard does not charge a protocol fee.
+   * Fast is quoted by the relayer. Default `STANDARD`.
+   */
+  transferMode?: "STANDARD" | "FAST";
   /**
    * When true (default), poll the relayer until the Sui-side receive completes
    * and include the resulting Sui digest in the result.
@@ -824,6 +836,12 @@ export interface SolanaDepositResult {
   solanaTxHash: string;
   /** Sui receive/sweep digest, present when `waitForSui` resolved successfully. */
   suiTxHash?: string;
+  quoteId?: string;
+  /** USDC min units. Circle protocol fee from the deposit quote. */
+  transactionFee?: string;
+  /** USDC min units expected to arrive in the Bank. */
+  estimatedReceive?: string;
+  transferMode?: "STANDARD" | "FAST";
 }
 
 /** Result of a Solana withdrawal via the relayer. */
@@ -832,6 +850,45 @@ export interface SolanaWithdrawResult {
   suiTxHash: string;
   /** Solana mint/receive tx hash, present when `waitForSolana` resolved. */
   solanaTxHash?: string;
+  quoteId?: string;
+  /** USDC min units. */
+  transactionFee?: string;
+  /** USDC min units expected on Solana after the fee. */
+  estimatedReceive?: string;
+}
+
+/** Same shape as a Solana CCTP deposit, for an EVM source chain. */
+export interface EvmDepositParams {
+  amount: number | string;
+  /** Polygon only supports STANDARD. Default STANDARD. */
+  transferMode?: "STANDARD" | "FAST";
+  waitForSui?: boolean;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}
+
+export interface EvmDepositResult {
+  evmTxHash: string;
+  suiTxHash?: string;
+  quoteId?: string;
+  transactionFee?: string;
+  estimatedReceive?: string;
+  transferMode?: "STANDARD" | "FAST";
+}
+
+export interface EvmWithdrawParams {
+  amount: number | string;
+  waitForDestination?: boolean;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}
+
+export interface EvmWithdrawResult {
+  suiTxHash: string;
+  destinationTxHash?: string;
+  quoteId?: string;
+  transactionFee?: string;
+  estimatedReceive?: string;
 }
 
 /** Parameters for a Solana withdrawal (Sui Bank -> Solana wallet via relayer). */

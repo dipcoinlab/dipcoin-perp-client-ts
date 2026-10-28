@@ -2,19 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Circle CCTP V1 (Solana <-> Sui) constants and helpers.
+ * Circle CCTP V2 (Solana -> Sui) constants.
  *
- * Values mirror `perp-ts-library/examples/cctp/sol2sui.ts` and the dApp
- * (`ts-frontend/src/utils/cctp/config.ts`):
- *  - Circle's official contract ids on Sui / Solana (testnet / mainnet)
- *  - CCTP domain ids: Sui = 8, Solana = 5
- *  - destinationCaller = keccak256("{packageId}::cctp::CctpReceiveAuth")
+ * The Solana burn is TokenMessengerMinterV2 `depositForBurn`.
+ * mintRecipient, destinationCaller, maxFee and minFinalityThreshold come from
+ * `GET /api/perp-relayer/v1/cctp/deposit/quote`. MessageTransmitter program id
+ * and the USDC mint come from `GET /api/perp-relayer/v1/sponsor/solana/fee-payer`.
+ * Do not keccak a package id locally — that was the V1 formula and strands funds.
  *
- * Unlike the dApp, the network is always passed explicitly (the headless SDK
- * already knows its `network` from {@link DipCoinPerpSDKOptions}).
+ * Domain ids: Solana = 5, Sui = 8.
  */
 import { PublicKey } from "@solana/web3.js";
-import { keccak256, toUtf8Bytes } from "ethers";
 
 /** SDK network kind. Matches `DipCoinPerpSDKOptions.network`. */
 export type CctpNetwork = "testnet" | "mainnet";
@@ -64,11 +62,11 @@ export const SUI_CCTP_ADDRESSES: Record<CctpNetwork, SuiCctpAddresses> = {
   },
 };
 
-/** Circle's official Solana-side program ids (same across testnet / mainnet). */
-export const SOLANA_CCTP_PROGRAMS = {
-  messageTransmitter: "CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd",
-  tokenMessengerMinter: "CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3",
-};
+/**
+ * TokenMessengerMinterV2. Same on mainnet and devnet.
+ * MessageTransmitterV2 is not hardcoded: the relayer returns it on fee-payer.
+ */
+export const SOLANA_TOKEN_MESSENGER_MINTER_V2 = "CCTPV2vPZJS2u2BBsUoscuikbYjnpFmbFsvVuJdgUMQe";
 
 /** Solana-side USDC mint (testnet uses Circle's devnet test USDC). */
 export const SOLANA_USDC_MINTS: Record<CctpNetwork, string> = {
@@ -93,21 +91,6 @@ export function normalizeSuiAddress(address: string): string {
     throw new Error(`Invalid Sui address: ${address}`);
   }
   return `0x${hex.padStart(64, "0")}`;
-}
-
-/** Build `"{packageId}::{module}::{type}"` (strips 0x then pads to 64). */
-export function suiTypeName(packageId: string, moduleName: string, typeName: string): string {
-  return `${stripHexPrefix(normalizeSuiAddress(packageId))}::${moduleName}::${typeName}`;
-}
-
-/**
- * destinationCaller = keccak256("{packageId}::cctp::CctpReceiveAuth").
- *
- * CCTP uses these 32 bytes to enforce "only the business contract may receive
- * this message", preventing front-running the Sui-side receive.
- */
-export function cctpReceiveDestinationCaller(packageId: string): string {
-  return keccak256(toUtf8Bytes(suiTypeName(packageId, "cctp", "CctpReceiveAuth")));
 }
 
 const hexToBuffer = (value: string): Buffer => Buffer.from(stripHexPrefix(value), "hex");

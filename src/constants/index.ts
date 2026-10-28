@@ -65,8 +65,13 @@ export const API_ENDPOINTS = {
 
   // ------------- Relayer (non-Sui / Solana signed payload execution) -------------
   RELAY: "/api/perp-relayer/v1/relay",
-  CCTP_DEPOSIT_STATUS: "/api/perp-relayer/v1/cctp/deposit/sol/status",
+  CCTP_DEPOSIT_QUOTE: "/api/perp-relayer/v1/cctp/deposit/quote",
+  CCTP_DEPOSIT_SUBMIT: "/api/perp-relayer/v1/cctp/deposit/submit",
+  CCTP_DEPOSIT_STATUS: "/api/perp-relayer/v1/cctp/deposit/status",
+  CCTP_WITHDRAW_QUOTE: "/api/perp-relayer/v1/cctp/withdraw/quote",
   CCTP_WITHDRAW_STATUS: "/api/perp-relayer/v1/cctp/withdraw/sol/status",
+  CCTP_WITHDRAW_STATUS_EVM: "/api/perp-relayer/v1/cctp/withdraw/status",
+  SOLANA_FEE_PAYER: "/api/perp-relayer/v1/sponsor/solana/fee-payer",
 
   // ------------- Vault: public -------------
   VAULT_OVERVIEW: "/api/perp-vault-api/public/overview",
